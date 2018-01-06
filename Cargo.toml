@@ -1,0 +1,28 @@
+[package]
+name = "rvmti"
+version = "0.1.0"
+authors = ["rel-eng <rel-eng@yandex.ru>"]
+license = "BSD-3-Clause"
+license-file = "LICENSE"
+
+[dependencies]
+lazy_static = "0.2.10"
+log = "0.3.8"
+env_logger = "0.4.3"
+
+[dependencies.rvmti-sys]
+path = "rvmti-sys"
+version = "0.1.0"
+
+[lib]
+name = "rvmti"
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = 3
+debug = false
+rpath = false
+lto = true
+debug-assertions = false
+codegen-units = 1
+panic = 'unwind'
