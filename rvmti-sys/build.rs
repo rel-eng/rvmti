@@ -35,7 +35,7 @@ impl ParseCallbacks for MacroCallback {
 }
 
 fn main() {
-    env_logger::init().expect("Logger initialization failed");
+    env_logger::init();
     println!("cargo:rerun-if-changed=src/wrapper.h");
     println!("cargo:rerun-if-changed=src/glue.c");
     println!("cargo:rerun-if-changed=src/glue.h");

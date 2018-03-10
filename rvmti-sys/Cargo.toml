@@ -9,10 +9,10 @@ name = "rvmti-sys"
 version = "0.1.0"
 
 [build-dependencies]
-bindgen = "0.32.1"
+bindgen = "0.33.1"
 gcc = "0.3.54"
-log = "0.3.8"
-env_logger = "0.4.3"
+log = "0.4.1"
+env_logger = "0.5.5"
 
 [profile.release]
 opt-level = 3

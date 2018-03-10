@@ -6,9 +6,9 @@ license = "BSD-3-Clause"
 license-file = "LICENSE"
 
 [dependencies]
-lazy_static = "0.2.10"
-log = "0.3.8"
-env_logger = "0.4.3"
+lazy_static = "1.0.0"
+log = "0.4.1"
+env_logger = "0.5.5"
 
 [dependencies.rvmti-sys]
 path = "rvmti-sys"

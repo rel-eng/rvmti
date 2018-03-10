@@ -33,15 +33,7 @@ pub extern "C" fn Agent_OnLoad(vm: *mut rvmti_sys::JavaVM, options: *const c_cha
         env_logger::init()
     });
     match log_init_result {
-        Ok(r) => {
-            match r {
-                Ok(()) => {},
-                Err(e) => {
-                    println!("Failed to initialize logger: {}", e);
-                    return -1;
-                }
-            }
-        },
+        Ok(r) => {},
         Err(e) => {
             println!("Failed to initialize logger: {:?}", e);
             return -1;
