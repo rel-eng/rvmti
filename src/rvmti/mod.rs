@@ -13,8 +13,6 @@ extern crate rvmti_sys;
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_void};
 use std::string::FromUtf8Error;
-use std::fmt;
-use std::error;
 use std::str;
 use std::ptr;
 use std::panic;
@@ -487,14 +485,21 @@ pub enum JvmtiEvent {
     VmObjectAlloc,
 }
 
-#[derive(Debug)]
+#[derive(Fail, Debug)]
 pub enum JniError {
+    #[fail(display = "Unknown JNI error")]
     UnknownError,
+    #[fail(display = "A thread is detached from the VM")]
     ThreadDetachedFromVm,
+    #[fail(display = "JNI version error")]
     JniVersionError,
+    #[fail(display = "Not enough memory")]
     NotEnoughMemory,
+    #[fail(display = "VM is already created")]
     VmAlreadyCreated,
+    #[fail(display = "Invalid arguments")]
     InvalidArguments,
+    #[fail(display = "Unsupported JNI error code: {}", _0)]
     UnsupportedError(i32),
 }
 
@@ -507,92 +512,156 @@ pub enum JvmtiVersion {
     CurrentVersion,
 }
 
-#[derive(Debug)]
+#[derive(Fail, Debug)]
 pub enum JvmtiError {
+    #[fail(display = "Invalid thread")]
     InvalidThread,
+    #[fail(display = "Invalid thread group")]
     InvalidThreadGroup,
+    #[fail(display = "Invalid priority")]
     InvalidPriority,
+    #[fail(display = "Thread is not suspended")]
     ThreadNotSuspended,
+    #[fail(display = "Thread is already suspended")]
     ThreadSuspended,
+    #[fail(display = "Thread is not alive")]
     ThreadNotAlive,
+    #[fail(display = "Invalid object")]
     InvalidObject,
+    #[fail(display = "Invalid class")]
     InvalidClass,
+    #[fail(display = "The class is not prepared yet")]
     ClassNotPrepared,
+    #[fail(display = "Invalid method id")]
     InvalidMethodId,
+    #[fail(display = "Invalid location")]
     InvalidLocation,
+    #[fail(display = "Invalid field id")]
     InvalidFieldId,
+    #[fail(display = "Invalid module")]
     InvalidModule,
+    #[fail(display = "There are no more stack frames")]
     NoMoreFrames,
+    #[fail(display = "No information is available about the stack frame")]
     OpaqueFrame,
+    #[fail(display = "Variable type mismatch")]
     TypeMismatch,
+    #[fail(display = "Invalid slot")]
     InvalidSlot,
+    #[fail(display = "The item is already set")]
     Duplicate,
+    #[fail(display = "Element is not found")]
     NotFound,
+    #[fail(display = "Invalid raw monitor")]
     InvalidMonitor,
+    #[fail(display = "The raw monitor is not owned by this thread")]
     NotMonitorOwner,
+    #[fail(display = "The call has been interrupted")]
     Interrupt,
+    #[fail(display = "Malformed class file")]
     InvalidClassFormat,
+    #[fail(display = "Circular class definition")]
     CircularClassDefinition,
+    #[fail(display = "The class fails verification")]
     FailsVerification,
+    #[fail(display = "Class redefinition not possible, method addition is unsupported")]
     UnsupportedRedefinitionMethodAdded,
+    #[fail(display = "Class redefinition not possible, field change is unsupported")]
     UnsupportedRedefinitionSchemaChanged,
+    #[fail(display = "The thread state is inconsistent due to it having been modified")]
     InvalidTypeState,
+    #[fail(display = "Class redefinition not possible, class hierarchy change is unsupported")]
     UnsupportedRedefinitionHierarchyChanged,
+    #[fail(display = "Class redefinition not possible, method deletion is unsupported")]
     UnsupportedRedefinitionMethodDeleted,
+    #[fail(display = "Class file version is unsupported")]
     UnsupportedVersion,
+    #[fail(display = "Class names do not match")]
     NamesDontMatch,
+    #[fail(display = "Class redefinition not possible, class modifiers change is unsupported")]
     UnsupportedRedefinitionClassModifiersChanged,
+    #[fail(display = "Class redefinition not possible, method modifiers change is unsupported")]
     UnsupportedRedefinitionMethodModifiersChanged,
+    #[fail(display = "The class is unmodifiable")]
     UnmodifiableClass,
+    #[fail(display = "The module is unmodifiable")]
     UnmodifiableModule,
+    #[fail(display = "The functionality is not available")]
     NotAvaliable,
+    #[fail(display = "This environment does not possess the required capability")]
     MustPosessCapability,
+    #[fail(display = "Unexpected null pointer")]
     NullPointer,
+    #[fail(display = "Information is not available")]
     AbsentInformation,
+    #[fail(display = "Invalid event type")]
     InvalidEventType,
+    #[fail(display = "Illegal argument")]
     IllegalArgument,
+    #[fail(display = "Information is not available for native method")]
     NativeMethod,
+    #[fail(display = "This class loader does not support the requested operation")]
     ClassLoaderUnsupported,
+    #[fail(display = "Out of memory")]
     OutOfMemory,
+    #[fail(display = "Access denied")]
     AccessDenied,
+    #[fail(display = "The functionality is not available in the current phase")]
     WrongPhase,
+    #[fail(display = "Unexpected internal error")]
     Internal,
+    #[fail(display = "The thread is not attached to the virtual machine")]
     UnattachedThread,
+    #[fail(display = "Invalid environment")]
     InvalidEnvironment,
+    #[fail(display = "Unsupported JVMTI error code: {}", _0)]
     UnsupportedError(u32),
 }
 
-#[derive(Debug)]
+#[derive(Fail, Debug)]
 pub enum AllocError {
+    #[fail(display = "Out of memory")]
     OutOfMemory,
 }
 
-#[derive(Debug)]
+#[derive(Fail, Debug)]
 pub enum GetMethodNameError {
-    VmError(JvmtiError),
-    NameDecodeError(StringDecodeError),
-    SignatureDecodeError(StringDecodeError),
-    GenericSignatureDecodeError(StringDecodeError),
+    #[fail(display = "JVMTI method call error: {}", _0)]
+    VmError(#[cause] JvmtiError),
+    #[fail(display = "Failed to decode method name: {}", _0)]
+    NameDecodeError(#[cause] StringDecodeError),
+    #[fail(display = "Failed to decode method signature: {}", _0)]
+    SignatureDecodeError(#[cause] StringDecodeError),
+    #[fail(display = "Failed to decode method generic signature: {}", _0)]
+    GenericSignatureDecodeError(#[cause] StringDecodeError),
 }
 
-#[derive(Debug)]
+#[derive(Fail, Debug)]
 pub enum GetClassSignatureError {
-    VmError(JvmtiError),
-    SignatureDecodeError(StringDecodeError),
-    GenericSignatureDecodeError(StringDecodeError),
+    #[fail(display = "JVMTI method call error: {}", _0)]
+    VmError(#[cause] JvmtiError),
+    #[fail(display = "Failed to decode class signature: {}", _0)]
+    SignatureDecodeError(#[cause] StringDecodeError),
+    #[fail(display = "Failed to decode class generic signature: {}", _0)]
+    GenericSignatureDecodeError(#[cause] StringDecodeError),
 }
 
-#[derive(Debug)]
+#[derive(Fail, Debug)]
 pub enum GetSourceFileNameError {
-    VmError(JvmtiError),
-    SourceFileNameDecodeError(StringDecodeError),
+    #[fail(display = "JVMTI method call error: {}", _0)]
+    VmError(#[cause] JvmtiError),
+    #[fail(display = "Failed to decode source file name: {}", _0)]
+    SourceFileNameDecodeError(#[cause] StringDecodeError),
 }
 
-#[derive(Debug)]
+#[derive(Fail, Debug)]
 pub enum StringDecodeError {
+    #[fail(display = "Invalid modified UTF-8 encoding")]
     ModifiedUtf8Error,
-    FromUtf8Error(FromUtf8Error),
-    Utf8Error(str::Utf8Error),
+    #[fail(display = "Invalid UTF-8 byte string: {}", _0)]
+    FromUtf8Error(#[cause] FromUtf8Error),
+    #[fail(display = "Invalid UTF-8 byte string: {}", _0)]
+    Utf8Error(#[cause] str::Utf8Error),
 }
 
 impl Jvm {
@@ -2014,380 +2083,6 @@ impl<'a> Drop for VmOwnedLineNumberTable<'a> {
                     warn!("Failed to deallocate VM owned line number table {}", JvmtiError::from(result));
                 }
             }
-        }
-    }
-
-}
-
-impl fmt::Display for StringDecodeError {
-
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            StringDecodeError::ModifiedUtf8Error => write!(f, "Invalid modified UTF-8 encoding"),
-            StringDecodeError::FromUtf8Error(ref error) => error.fmt(f),
-            StringDecodeError::Utf8Error(ref error) => error.fmt(f),
-        }
-    }
-
-}
-
-impl fmt::Display for AllocError {
-
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            AllocError::OutOfMemory => write!(f, "Out of memory"),
-        }
-    }
-
-}
-
-impl fmt::Display for GetMethodNameError {
-
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            GetMethodNameError::VmError(ref error) => error.fmt(f),
-            GetMethodNameError::NameDecodeError(ref error) => error.fmt(f),
-            GetMethodNameError::SignatureDecodeError(ref error) => error.fmt(f),
-            GetMethodNameError::GenericSignatureDecodeError(ref error) => error.fmt(f),
-        }
-    }
-
-}
-
-impl fmt::Display for GetClassSignatureError {
-
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            GetClassSignatureError::VmError(ref error) => error.fmt(f),
-            GetClassSignatureError::SignatureDecodeError(ref error) => error.fmt(f),
-            GetClassSignatureError::GenericSignatureDecodeError(ref error) => error.fmt(f),
-        }
-    }
-
-}
-
-impl fmt::Display for GetSourceFileNameError {
-
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            GetSourceFileNameError::VmError(ref error) => error.fmt(f),
-            GetSourceFileNameError::SourceFileNameDecodeError(ref error) => error.fmt(f),
-        }
-    }
-
-}
-
-impl fmt::Display for JvmtiError {
-
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            JvmtiError::InvalidThread => write!(f, "Invalid thread"),
-            JvmtiError::InvalidThreadGroup => write!(f, "Invalid thread group"),
-            JvmtiError::InvalidPriority => write!(f, "Invalid priority"),
-            JvmtiError::ThreadNotSuspended => write!(f, "Thread is not suspended"),
-            JvmtiError::ThreadSuspended => write!(f, "Thread is already suspended"),
-            JvmtiError::ThreadNotAlive => write!(f, "Thread is not alive"),
-            JvmtiError::InvalidObject => write!(f, "Invalid object"),
-            JvmtiError::InvalidClass => write!(f, "Invalid class"),
-            JvmtiError::ClassNotPrepared => write!(f, "The class is not prepared yet"),
-            JvmtiError::InvalidMethodId => write!(f, "Invalid method id"),
-            JvmtiError::InvalidLocation => write!(f, "Invalid location"),
-            JvmtiError::InvalidFieldId => write!(f, "Invalid field id"),
-            JvmtiError::InvalidModule => write!(f, "Invalid module"),
-            JvmtiError::NoMoreFrames => write!(f, "There are no more stack frames"),
-            JvmtiError::OpaqueFrame => write!(f, "No information is available about the stack frame"),
-            JvmtiError::TypeMismatch => write!(f, "Variable type mismatch"),
-            JvmtiError::InvalidSlot => write!(f, "Invalid slot"),
-            JvmtiError::Duplicate => write!(f, "The item is already set"),
-            JvmtiError::NotFound => write!(f, "Element is not found"),
-            JvmtiError::InvalidMonitor => write!(f, "Invalid raw monitor"),
-            JvmtiError::NotMonitorOwner => write!(f, "The raw monitor is not owned by this thread"),
-            JvmtiError::Interrupt => write!(f, "The call has been interrupted"),
-            JvmtiError::InvalidClassFormat => write!(f, "Malformed class file"),
-            JvmtiError::CircularClassDefinition => write!(f, "Circular class definition"),
-            JvmtiError::FailsVerification => write!(f, "The class fails verification"),
-            JvmtiError::UnsupportedRedefinitionMethodAdded => write!(f, "Class redefinition not possible, method addition is unsupported"),
-            JvmtiError::UnsupportedRedefinitionSchemaChanged => write!(f, "Class redefinition not possible, field change is unsupported"),
-            JvmtiError::InvalidTypeState => write!(f, "The thread state is inconsistent due to it having been modified"),
-            JvmtiError::UnsupportedRedefinitionHierarchyChanged => write!(f, "Class redefinition not possible, class hierarchy change is unsupported"),
-            JvmtiError::UnsupportedRedefinitionMethodDeleted => write!(f, "Class redefinition not possible, method deletion is unsupported"),
-            JvmtiError::UnsupportedVersion => write!(f, "Class file version is unsupported"),
-            JvmtiError::NamesDontMatch => write!(f, "Class names do not match"),
-            JvmtiError::UnsupportedRedefinitionClassModifiersChanged => write!(f, "Class redefinition not possible, class modifiers change is unsupported"),
-            JvmtiError::UnsupportedRedefinitionMethodModifiersChanged => write!(f, "Class redefinition not possible, method modifiers change is unsupported"),
-            JvmtiError::UnmodifiableClass => write!(f, "The class is unmodifiable"),
-            JvmtiError::UnmodifiableModule => write!(f, "The module is unmodifiable"),
-            JvmtiError::NotAvaliable => write!(f, "The functionality is not available"),
-            JvmtiError::MustPosessCapability => write!(f, "This environment does not possess the required capability"),
-            JvmtiError::NullPointer => write!(f, "Unexpected null pointer"),
-            JvmtiError::AbsentInformation => write!(f, "Information is not available"),
-            JvmtiError::InvalidEventType => write!(f, "Invalid event type"),
-            JvmtiError::IllegalArgument => write!(f, "Illegal argument"),
-            JvmtiError::NativeMethod => write!(f, "Information is not available for native method"),
-            JvmtiError::ClassLoaderUnsupported => write!(f, "This class loader does not support the requested operation"),
-            JvmtiError::OutOfMemory => write!(f, "Out of memory"),
-            JvmtiError::AccessDenied => write!(f, "Access denied"),
-            JvmtiError::WrongPhase => write!(f, "The functionality is not available in the current phase"),
-            JvmtiError::Internal => write!(f, "Unexpected internal error"),
-            JvmtiError::UnattachedThread => write!(f, "The thread is not attached to the virtual machine"),
-            JvmtiError::InvalidEnvironment => write!(f, "Invalid environment"),
-            JvmtiError::UnsupportedError(code) => write!(f, "Unsupported error code {}", code),
-        }
-    }
-
-}
-
-impl fmt::Display for JniError {
-
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            JniError::UnknownError => write!(f, "Unknown JNI error"),
-            JniError::ThreadDetachedFromVm => write!(f, "A thread is detached from the VM"),
-            JniError::JniVersionError => write!(f, "JNI version error"),
-            JniError::NotEnoughMemory => write!(f, "Not enough memory"),
-            JniError::VmAlreadyCreated => write!(f, "VM is already created"),
-            JniError::InvalidArguments => write!(f, "Invalid arguments"),
-            JniError::UnsupportedError(code) => write!(f, "Unsupported error code {}", code),
-        }
-    }
-
-}
-
-impl error::Error for StringDecodeError {
-
-    fn description(&self) -> &str {
-        match *self {
-            StringDecodeError::ModifiedUtf8Error => "Invalid modified UTF-8 encoding",
-            StringDecodeError::FromUtf8Error(ref error) => error.description(),
-            StringDecodeError::Utf8Error(ref error) => error.description(),
-        }
-    }
-
-    fn cause(&self) -> Option<&error::Error> {
-        match *self {
-            StringDecodeError::ModifiedUtf8Error => None,
-            StringDecodeError::FromUtf8Error(ref error) => Some(error),
-            StringDecodeError::Utf8Error(ref error) => Some(error),
-        }
-    }
-
-}
-
-impl error::Error for AllocError {
-
-    fn description(&self) -> &str {
-        match *self {
-            AllocError::OutOfMemory => "Out of memory",
-        }
-    }
-
-    fn cause(&self) -> Option<&error::Error> {
-        match *self {
-            AllocError::OutOfMemory => None,
-        }
-    }
-
-}
-
-impl error::Error for GetMethodNameError {
-
-    fn description(&self) -> &str {
-        match *self {
-            GetMethodNameError::VmError(ref error) => error.description(),
-            GetMethodNameError::NameDecodeError(ref error) => error.description(),
-            GetMethodNameError::SignatureDecodeError(ref error) => error.description(),
-            GetMethodNameError::GenericSignatureDecodeError(ref error) => error.description(),
-        }
-    }
-
-    fn cause(&self) -> Option<&error::Error> {
-        match *self {
-            GetMethodNameError::VmError(ref error) => Some(error),
-            GetMethodNameError::NameDecodeError(ref error) => Some(error),
-            GetMethodNameError::SignatureDecodeError(ref error) => Some(error),
-            GetMethodNameError::GenericSignatureDecodeError(ref error) => Some(error),
-        }
-    }
-
-}
-
-impl error::Error for GetClassSignatureError {
-
-    fn description(&self) -> &str {
-        match *self {
-            GetClassSignatureError::VmError(ref error) => error.description(),
-            GetClassSignatureError::SignatureDecodeError(ref error) => error.description(),
-            GetClassSignatureError::GenericSignatureDecodeError(ref error) => error.description(),
-        }
-    }
-
-    fn cause(&self) -> Option<&error::Error> {
-        match *self {
-            GetClassSignatureError::VmError(ref error) => Some(error),
-            GetClassSignatureError::SignatureDecodeError(ref error) => Some(error),
-            GetClassSignatureError::GenericSignatureDecodeError(ref error) => Some(error),
-        }
-    }
-
-}
-
-impl error::Error for GetSourceFileNameError {
-
-    fn description(&self) -> &str {
-        match *self {
-            GetSourceFileNameError::VmError(ref error) => error.description(),
-            GetSourceFileNameError::SourceFileNameDecodeError(ref error) => error.description(),
-        }
-    }
-
-    fn cause(&self) -> Option<&error::Error> {
-        match *self {
-            GetSourceFileNameError::VmError(ref error) => Some(error),
-            GetSourceFileNameError::SourceFileNameDecodeError(ref error) => Some(error),
-        }
-    }
-
-}
-
-impl error::Error for JvmtiError {
-
-    fn description(&self) -> &str {
-        match *self {
-            JvmtiError::InvalidThread => "Invalid thread",
-            JvmtiError::InvalidThreadGroup => "Invalid thread group",
-            JvmtiError::InvalidPriority => "Invalid priority",
-            JvmtiError::ThreadNotSuspended => "Thread is not suspended",
-            JvmtiError::ThreadSuspended => "Thread is already suspended",
-            JvmtiError::ThreadNotAlive => "Thread is not alive",
-            JvmtiError::InvalidObject => "Invalid object",
-            JvmtiError::InvalidClass => "Invalid class",
-            JvmtiError::ClassNotPrepared => "The class is not prepared yet",
-            JvmtiError::InvalidMethodId => "Invalid method id",
-            JvmtiError::InvalidLocation => "Invalid location",
-            JvmtiError::InvalidFieldId => "Invalid field id",
-            JvmtiError::InvalidModule => "Invalid module",
-            JvmtiError::NoMoreFrames => "There are no more stack frames",
-            JvmtiError::OpaqueFrame => "No information is available about the stack frame",
-            JvmtiError::TypeMismatch => "Variable type mismatch",
-            JvmtiError::InvalidSlot => "Invalid slot",
-            JvmtiError::Duplicate => "The item is already set",
-            JvmtiError::NotFound => "Element is not found",
-            JvmtiError::InvalidMonitor => "Invalid raw monitor",
-            JvmtiError::NotMonitorOwner => "The raw monitor is not owned by this thread",
-            JvmtiError::Interrupt => "The call has been interrupted",
-            JvmtiError::InvalidClassFormat => "Malformed class file",
-            JvmtiError::CircularClassDefinition => "Circular class definition",
-            JvmtiError::FailsVerification => "The class fails verification",
-            JvmtiError::UnsupportedRedefinitionMethodAdded => "Class redefinition not possible, method addition is unsupported",
-            JvmtiError::UnsupportedRedefinitionSchemaChanged => "Class redefinition not possible, field change is unsupported",
-            JvmtiError::InvalidTypeState => "The thread state is inconsistent due to it having been modified",
-            JvmtiError::UnsupportedRedefinitionHierarchyChanged => "Class redefinition not possible, class hierarchy change is unsupported",
-            JvmtiError::UnsupportedRedefinitionMethodDeleted => "Class redefinition not possible, method deletion is unsupported",
-            JvmtiError::UnsupportedVersion => "Class file version is unsupported",
-            JvmtiError::NamesDontMatch => "Class names do not match",
-            JvmtiError::UnsupportedRedefinitionClassModifiersChanged => "Class redefinition not possible, class modifiers change is unsupported",
-            JvmtiError::UnsupportedRedefinitionMethodModifiersChanged => "Class redefinition not possible, method modifiers change is unsupported",
-            JvmtiError::UnmodifiableClass => "The class is unmodifiable",
-            JvmtiError::UnmodifiableModule => "The module is unmodifiable",
-            JvmtiError::NotAvaliable => "The functionality is not available",
-            JvmtiError::MustPosessCapability => "This environment does not possess the required capability",
-            JvmtiError::NullPointer => "Unexpected null pointer",
-            JvmtiError::AbsentInformation => "Information is not available",
-            JvmtiError::InvalidEventType => "Invalid event type",
-            JvmtiError::IllegalArgument => "Illegal argument",
-            JvmtiError::NativeMethod => "Information is not available for native method",
-            JvmtiError::ClassLoaderUnsupported => "This class loader does not support the requested operation",
-            JvmtiError::OutOfMemory => "Out of memory",
-            JvmtiError::AccessDenied => "Access denied",
-            JvmtiError::WrongPhase => "The functionality is not available in the current phase",
-            JvmtiError::Internal => "Unexpected internal error",
-            JvmtiError::UnattachedThread => "The thread is not attached to the virtual machine",
-            JvmtiError::InvalidEnvironment => "Invalid environment",
-            JvmtiError::UnsupportedError(_) => "Unsupported error code",
-        }
-    }
-
-    fn cause(&self) -> Option<&error::Error> {
-        match *self {
-            JvmtiError::InvalidThread => None,
-            JvmtiError::InvalidThreadGroup => None,
-            JvmtiError::InvalidPriority => None,
-            JvmtiError::ThreadNotSuspended => None,
-            JvmtiError::ThreadSuspended => None,
-            JvmtiError::ThreadNotAlive => None,
-            JvmtiError::InvalidObject => None,
-            JvmtiError::InvalidClass => None,
-            JvmtiError::ClassNotPrepared => None,
-            JvmtiError::InvalidMethodId => None,
-            JvmtiError::InvalidLocation => None,
-            JvmtiError::InvalidFieldId => None,
-            JvmtiError::InvalidModule => None,
-            JvmtiError::NoMoreFrames => None,
-            JvmtiError::OpaqueFrame => None,
-            JvmtiError::TypeMismatch => None,
-            JvmtiError::InvalidSlot => None,
-            JvmtiError::Duplicate => None,
-            JvmtiError::NotFound => None,
-            JvmtiError::InvalidMonitor => None,
-            JvmtiError::NotMonitorOwner => None,
-            JvmtiError::Interrupt => None,
-            JvmtiError::InvalidClassFormat => None,
-            JvmtiError::CircularClassDefinition => None,
-            JvmtiError::FailsVerification => None,
-            JvmtiError::UnsupportedRedefinitionMethodAdded => None,
-            JvmtiError::UnsupportedRedefinitionSchemaChanged => None,
-            JvmtiError::InvalidTypeState => None,
-            JvmtiError::UnsupportedRedefinitionHierarchyChanged => None,
-            JvmtiError::UnsupportedRedefinitionMethodDeleted => None,
-            JvmtiError::UnsupportedVersion => None,
-            JvmtiError::NamesDontMatch => None,
-            JvmtiError::UnsupportedRedefinitionClassModifiersChanged => None,
-            JvmtiError::UnsupportedRedefinitionMethodModifiersChanged => None,
-            JvmtiError::UnmodifiableClass => None,
-            JvmtiError::UnmodifiableModule => None,
-            JvmtiError::NotAvaliable => None,
-            JvmtiError::MustPosessCapability => None,
-            JvmtiError::NullPointer => None,
-            JvmtiError::AbsentInformation => None,
-            JvmtiError::InvalidEventType => None,
-            JvmtiError::IllegalArgument => None,
-            JvmtiError::NativeMethod => None,
-            JvmtiError::ClassLoaderUnsupported => None,
-            JvmtiError::OutOfMemory => None,
-            JvmtiError::AccessDenied => None,
-            JvmtiError::WrongPhase => None,
-            JvmtiError::Internal => None,
-            JvmtiError::UnattachedThread => None,
-            JvmtiError::InvalidEnvironment => None,
-            JvmtiError::UnsupportedError(_) => None,
-        }
-    }
-
-}
-
-impl error::Error for JniError {
-
-    fn description(&self) -> &str {
-        match *self {
-            JniError::UnknownError => "Unknown JNI error",
-            JniError::ThreadDetachedFromVm => "A thread is detached from the VM",
-            JniError::JniVersionError => "JNI version error",
-            JniError::NotEnoughMemory => "Not enough memory",
-            JniError::VmAlreadyCreated => "VM is already created",
-            JniError::InvalidArguments => "Invalid arguments",
-            JniError::UnsupportedError(_) => "Unsupported error code",
-        }
-    }
-
-    fn cause(&self) -> Option<&error::Error> {
-        match *self {
-            JniError::UnknownError => None,
-            JniError::ThreadDetachedFromVm => None,
-            JniError::JniVersionError => None,
-            JniError::NotEnoughMemory => None,
-            JniError::VmAlreadyCreated => None,
-            JniError::InvalidArguments => None,
-            JniError::UnsupportedError(_) => None,
         }
     }
 

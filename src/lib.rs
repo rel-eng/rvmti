@@ -11,12 +11,13 @@ mod rvmti;
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
+extern crate failure;
+#[macro_use]
+extern crate failure_derive;
 
 use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::sync::MutexGuard;
-use std::fmt;
-use std::error;
 
 pub use rvmti::Agent_OnLoad;
 pub use rvmti::Agent_OnUnload;
@@ -96,18 +97,19 @@ pub fn jvmti_event_compiled_method_load(env: &mut rvmti::JvmtiEnv, method_id: &r
     // It does not look like a huge problem as Agent_OnUnload is called on JVM shutdown anyway
     // Lock on the environment would prevent this but then all handlers would be executed serially which is undesirable
     // Maybe name resolution can be moved to the dedicated thread using some lock-free queue...
-    // TODO Log errors
-    let method_name = env.get_method_name(&method_id).ok();
-    let class_id = env.get_method_declaring_class(&method_id).ok();
-    let (class_signature, source_file_name) = match class_id {
-        Some(id) => {
-            (env.get_class_signature(&id).ok(), env.get_source_file_name(&id).ok().and_then(|e| e))
+    let method_info = method_info(env, method_id);
+    match method_info {
+        Ok(info) => {
+            info!("'Compiled method load' event fired: {:?}, {:?}, {:?}, 0x{:x}, {}, {:?}, {:?}, {:?}",
+                  info.name, info.class.signature, info.class.source_file_name, address, length,
+                  info.line_numbers, address_locations, compile_info);
         },
-        None => (None, None),
-    };
-    let line_numbers = env.get_line_number_table(&method_id).ok().and_then(|e| e);
-    info!("'Compiled method load' event fired: {:?}, {:?}, {:?}, 0x{:x}, {}, {:?}, {:?}, {:?}", method_name, class_signature,
-             source_file_name, address, length, line_numbers, address_locations, compile_info);
+        Err(e) => {
+            info!("'Compiled method load' event fired: {:?}, 0x{:x}, {}, {:?}, {:?}",
+                  method_id, address, length, address_locations, compile_info);
+            error!("Failed to get compiled method info: {}", e)
+        }
+    }
 }
 
 pub fn jvmti_event_dynamic_code_generated(env: &mut rvmti::JvmtiEnv, name: &Option<String>, address: usize, length: usize) {
@@ -117,7 +119,7 @@ pub fn jvmti_event_dynamic_code_generated(env: &mut rvmti::JvmtiEnv, name: &Opti
 fn unload_environment(env: &mut rvmti::JvmtiEnv) {
 }
 
-fn do_on_load<'a>(vm: &rvmti::Jvm, options: &Option<String>) -> Result<(), AgentInitError<'a>> {
+fn do_on_load<'a>(vm: &rvmti::Jvm, options: &Option<String>) -> Result<(), AgentInitError> {
     let mut jvmti_env = vm.get_jvmti_env(rvmti::JvmtiVersion::CurrentVersion)
         .map_err(|e| AgentInitError::UnableToObtainJvmtiEnvironment(e))?;
     debug!("Environment obtained");
@@ -129,14 +131,14 @@ fn do_on_load<'a>(vm: &rvmti::Jvm, options: &Option<String>) -> Result<(), Agent
     }
 }
 
-fn initialize_agent<'a>(env: &mut rvmti::JvmtiEnv, options: &Option<String>) -> Result<(), AgentInitError<'a>> {
+fn initialize_agent<'a>(env: &mut rvmti::JvmtiEnv, options: &Option<String>) -> Result<(), AgentInitError> {
     let _ = add_capabilities(env)?;
     let _ = set_event_callbacks(env)?;
     let _ = enable_events(env)?;
     Ok(())
 }
 
-fn add_capabilities<'a>(env: &mut rvmti::JvmtiEnv) -> Result<(), AgentInitError<'a>> {
+fn add_capabilities<'a>(env: &mut rvmti::JvmtiEnv) -> Result<(), AgentInitError> {
     let mut capabilities = rvmti::JvmtiCapabilities::new_empty_capabilities()
         .map_err(AgentInitError::UnableToAllocateCapabilities)?;
 
@@ -152,7 +154,7 @@ fn add_capabilities<'a>(env: &mut rvmti::JvmtiEnv) -> Result<(), AgentInitError<
     Ok(())
 }
 
-fn set_event_callbacks<'a>(env: &mut rvmti::JvmtiEnv) -> Result<(), AgentInitError<'a>> {
+fn set_event_callbacks<'a>(env: &mut rvmti::JvmtiEnv) -> Result<(), AgentInitError> {
     let mut settings = rvmti::JvmtiEventCallbacksSettings::new_empty_settings()
         .map_err(AgentInitError::UnableToAllocateEventCallbackSettings)?;
     settings.set_compiled_method_load_enabled(true);
@@ -162,7 +164,7 @@ fn set_event_callbacks<'a>(env: &mut rvmti::JvmtiEnv) -> Result<(), AgentInitErr
     Ok(())
 }
 
-fn enable_events<'a>(env: &mut rvmti::JvmtiEnv) -> Result<(), AgentInitError<'a>> {
+fn enable_events<'a>(env: &mut rvmti::JvmtiEnv) -> Result<(), AgentInitError> {
     env.set_event_notification_mode(rvmti::JvmtiEventMode::Enable, rvmti::JvmtiEvent::CompiledMethodLoad, None)
         .map_err(AgentInitError::UnableToEnableEvents)?;
     env.set_event_notification_mode(rvmti::JvmtiEventMode::Enable, rvmti::JvmtiEvent::DynamicCodeGenerated, None)
@@ -171,65 +173,81 @@ fn enable_events<'a>(env: &mut rvmti::JvmtiEnv) -> Result<(), AgentInitError<'a>
     Ok(())
 }
 
+#[derive(Fail, Debug)]
+enum AgentInitError {
+    #[fail(display = "Failed to allocate capabilities: {}", _0)]
+    UnableToAllocateCapabilities(#[cause] rvmti::AllocError),
+    #[fail(display = "Failed to add capabilities: {}", _0)]
+    UnableToAddCapabilities(#[cause] rvmti::JvmtiError),
+    #[fail(display = "Failed to allocate event callback settings: {}", _0)]
+    UnableToAllocateEventCallbackSettings(#[cause] rvmti::AllocError),
+    #[fail(display = "Failed to set event callbacks: {}", _0)]
+    UnableToSetEventCallbacks(#[cause] rvmti::JvmtiError),
+    #[fail(display = "Failed to enable events: {}", _0)]
+    UnableToEnableEvents(#[cause] rvmti::JvmtiError),
+    #[fail(display = "Failed to obtain jvmti environment: {}", _0)]
+    UnableToObtainJvmtiEnvironment(#[cause] rvmti::JniError),
+    #[fail(display = "The mutex was poisoned")]
+    PoisonedMutexError,
+}
+
+impl<'a> From<PoisonError<MutexGuard<'a, Vec<rvmti::JvmtiEnv>>>> for AgentInitError {
+
+    fn from(_error: PoisonError<MutexGuard<'a, Vec<rvmti::JvmtiEnv>>>) -> AgentInitError {
+        AgentInitError::PoisonedMutexError
+    }
+
+}
+
 #[derive(Debug)]
-enum AgentInitError<'a> {
-    UnableToAllocateCapabilities(rvmti::AllocError),
-    UnableToAddCapabilities(rvmti::JvmtiError),
-    UnableToAllocateEventCallbackSettings(rvmti::AllocError),
-    UnableToSetEventCallbacks(rvmti::JvmtiError),
-    UnableToEnableEvents(rvmti::JvmtiError),
-    UnableToObtainJvmtiEnvironment(rvmti::JniError),
-    MutexError(PoisonError<MutexGuard<'a, Vec<rvmti::JvmtiEnv>>>),
+struct MethodInfo {
+    name: rvmti::MethodName,
+    class: ClassInfo,
+    line_numbers: Option<Vec<rvmti::LineNumberEntry>>,
 }
 
-impl<'a> fmt::Display for AgentInitError<'a> {
-
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            AgentInitError::UnableToAllocateCapabilities(ref error) => write!(f, "Unable to allocate capabilities: {}", error),
-            AgentInitError::UnableToAddCapabilities(ref error) => write!(f, "Unable to add capabilities: {}", error),
-            AgentInitError::UnableToAllocateEventCallbackSettings(ref error) => write!(f, "Unable to allocate event callback settings: {}", error),
-            AgentInitError::UnableToSetEventCallbacks(ref error) => write!(f, "Unable to set event callbacks: {}", error),
-            AgentInitError::UnableToEnableEvents(ref error) => write!(f, "Unable to enable events: {}", error),
-            AgentInitError::UnableToObtainJvmtiEnvironment(ref error) => write!(f, "Unable to obtain environment: {}", error),
-            AgentInitError::MutexError(ref error) => write!(f, "Mutex error: {}", error),
-        }
-    }
-
+#[derive(Debug)]
+struct ClassInfo {
+    signature: rvmti::ClassSignature,
+    source_file_name: Option<String>,
 }
 
-impl<'a> error::Error for AgentInitError<'a> {
-
-    fn description(&self) -> &str {
-        match *self {
-            AgentInitError::UnableToAllocateCapabilities(ref error) => error.description(),
-            AgentInitError::UnableToAddCapabilities(ref error) => error.description(),
-            AgentInitError::UnableToAllocateEventCallbackSettings(ref error) => error.description(),
-            AgentInitError::UnableToSetEventCallbacks(ref error) => error.description(),
-            AgentInitError::UnableToEnableEvents(ref error) => error.description(),
-            AgentInitError::UnableToObtainJvmtiEnvironment(ref error) => error.description(),
-            AgentInitError::MutexError(ref error) => error.description(),
-        }
-    }
-
-    fn cause(&self) -> Option<&error::Error> {
-        match *self {
-            AgentInitError::UnableToAllocateCapabilities(ref error) => Some(error),
-            AgentInitError::UnableToAddCapabilities(ref error) => Some(error),
-            AgentInitError::UnableToAllocateEventCallbackSettings(ref error) => Some(error),
-            AgentInitError::UnableToSetEventCallbacks(ref error) => Some(error),
-            AgentInitError::UnableToEnableEvents(ref error) => Some(error),
-            AgentInitError::UnableToObtainJvmtiEnvironment(ref error) => Some(error),
-            AgentInitError::MutexError(ref error) => Some(error),
-        }
-    }
-
+#[derive(Fail, Debug)]
+enum MethodInfoError {
+    #[fail(display = "Failed to obtain method name: {}", _0)]
+    UnableToGetMethodName(#[cause] rvmti::GetMethodNameError),
+    #[fail(display = "Failed to obtain method declaring class id: {}", _0)]
+    UnableToGetMethodDeclaringClass(#[cause] rvmti::JvmtiError),
+    #[fail(display = "Failed to obtain method declaring class info: {}", _0)]
+    UnableToGetDeclaringClassInfo(#[cause] ClassInfoError),
+    #[fail(display = "Failed to obtain method line numbers: {}", _0)]
+    UnableToGetMethodLineNumbers(#[cause] rvmti::JvmtiError),
 }
 
-impl<'a> From<PoisonError<MutexGuard<'a, Vec<rvmti::JvmtiEnv>>>> for AgentInitError<'a> {
+#[derive(Fail, Debug)]
+enum ClassInfoError {
+    #[fail(display = "Failed to obtain class signature: {}", _0)]
+    UnableToGetClassSignature(#[cause] rvmti::GetClassSignatureError),
+    #[fail(display = "Failed to obtain class source file name: {}", _0)]
+    UnableToGetClassSourceFileName(#[cause] rvmti::GetSourceFileNameError),
+}
 
-    fn from(error: PoisonError<MutexGuard<'a, Vec<rvmti::JvmtiEnv>>>) -> AgentInitError<'a> {
-        AgentInitError::MutexError(error)
-    }
+fn method_info(env: &mut rvmti::JvmtiEnv, method_id: &rvmti::JMethodId) -> Result<MethodInfo, MethodInfoError> {
+    let name = env.get_method_name(&method_id)
+        .map_err(MethodInfoError::UnableToGetMethodName)?;
+    let declaring_class_id = env.get_method_declaring_class(&method_id)
+        .map_err(MethodInfoError::UnableToGetMethodDeclaringClass)?;
+    let class = class_info(env, &declaring_class_id)
+        .map_err(MethodInfoError::UnableToGetDeclaringClassInfo)?;
+    let line_numbers = env.get_line_number_table(&method_id)
+        .map_err(MethodInfoError::UnableToGetMethodLineNumbers)?;
+    Ok(MethodInfo{name, class, line_numbers})
+}
 
+fn class_info(env: &mut rvmti::JvmtiEnv, class_id: &rvmti::JClass) -> Result<ClassInfo, ClassInfoError> {
+    let signature = env.get_class_signature(class_id)
+        .map_err(ClassInfoError::UnableToGetClassSignature)?;
+    let source_file_name = env.get_source_file_name(class_id)
+        .map_err(ClassInfoError::UnableToGetClassSourceFileName)?;
+    Ok(ClassInfo{signature, source_file_name})
 }
