@@ -14,14 +14,10 @@ extern crate log;
 extern crate failure;
 #[macro_use]
 extern crate failure_derive;
-extern crate chashmap;
 
 use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::sync::MutexGuard;
-use std::sync::Arc;
-
-use chashmap::CHashMap;
 
 pub use rvmti::Agent_OnLoad;
 pub use rvmti::Agent_OnUnload;
@@ -59,8 +55,6 @@ pub use rvmti::jvmti_event_vm_start_handler;
 
 lazy_static! {
     static ref JVMTI_ENVIRONMENTS: Mutex<Vec<rvmti::JvmtiEnv>> = Mutex::new(Vec::new());
-    static ref METHOD_INFO_CACHE: CHashMap<rvmti::JMethodId, Arc<MethodInfo>> = CHashMap::new();
-    static ref CLASS_INFO_CACHE: CHashMap<rvmti::JClass, Arc<ClassInfo>> = CHashMap::new();
 }
 
 pub fn agent_on_load(vm: &rvmti::Jvm, options: &Option<String>) -> i32 {
@@ -92,8 +86,6 @@ pub fn agent_on_unload(vm: &rvmti::Jvm) {
             warn!("Failed to lock environments global storage: {}", err);
         }
     }
-    CLASS_INFO_CACHE.clear();
-    METHOD_INFO_CACHE.clear();
     info!("Agent unloaded");
 }
 
@@ -108,14 +100,25 @@ pub fn jvmti_event_compiled_method_load(env: &mut rvmti::JvmtiEnv, method_id: &r
     let method_info = method_info(env, method_id);
     match method_info {
         Ok(info) => {
-            info!("'Compiled method load' event fired: {:?}, {:?}, {:?}, 0x{:x}, {}, {:?}, {:?}, {:?}",
-                  info.name, info.class.signature, info.class.source_file_name, address, length,
-                  info.line_numbers, address_locations, compile_info);
+            let stack_info = stack_info(env, compile_info);
+            match stack_info {
+                Ok(stack_info_value) => {
+                    info!("'Compiled method load' event fired: {:?}, {:?}, {:?}, 0x{:x}, {}, {:?}, {:?}, {:?}",
+                          info.name, info.class.signature, info.class.source_file_name, address, length,
+                          info.line_numbers, address_locations, stack_info_value);
+                },
+                Err(e) => {
+                    info!("'Compiled method load' event fired: {:?}, {:?}, {:?}, 0x{:x}, {}, {:?}, {:?}, {:?}",
+                          info.name, info.class.signature, info.class.source_file_name, address, length,
+                          info.line_numbers, address_locations, compile_info);
+                    error!("Failed to process method inlining info: {}", e);
+                }
+            }
         },
         Err(e) => {
             info!("'Compiled method load' event fired: {:?}, 0x{:x}, {}, {:?}, {:?}",
                   method_id, address, length, address_locations, compile_info);
-            error!("Failed to get compiled method info: {}", e)
+            error!("Failed to get compiled method info: {}", e);
         }
     }
 }
@@ -210,7 +213,7 @@ impl<'a> From<PoisonError<MutexGuard<'a, Vec<rvmti::JvmtiEnv>>>> for AgentInitEr
 #[derive(Debug)]
 struct MethodInfo {
     name: rvmti::MethodName,
-    class: Arc<ClassInfo>,
+    class: ClassInfo,
     native_method: bool,
     line_numbers: Option<Vec<rvmti::LineNumberEntry>>,
 }
@@ -225,6 +228,12 @@ struct ClassInfo {
 struct StackFrameInfo {
     method: MethodInfo,
     byte_code_index: i32,
+}
+
+#[derive(Debug)]
+struct StackInfo {
+    pc_address: usize,
+    stack_frames: Vec<StackFrameInfo>,
 }
 
 #[derive(Fail, Debug)]
@@ -249,12 +258,13 @@ enum ClassInfoError {
     UnableToGetClassSourceFileName(#[cause] rvmti::GetSourceFileNameError),
 }
 
-fn method_info(env: &mut rvmti::JvmtiEnv, method_id: &rvmti::JMethodId) -> Result<Arc<MethodInfo>, MethodInfoError> {
-    let cached = METHOD_INFO_CACHE.get(method_id);
-    match cached {
-        Some(hit) => return Ok((*hit).clone()),
-        None => {},
-    }
+#[derive(Fail, Debug)]
+enum StackInfoError {
+    #[fail(display = "Failed to obtain method metadata: {}", _0)]
+    UnableToGetMethodInfo(#[cause] MethodInfoError),
+}
+
+fn method_info(env: &mut rvmti::JvmtiEnv, method_id: &rvmti::JMethodId) -> Result<MethodInfo, MethodInfoError> {
     let name = env.get_method_name(&method_id)
         .map_err(MethodInfoError::UnableToGetMethodName)?;
     let declaring_class_id = env.get_method_declaring_class(&method_id)
@@ -268,22 +278,44 @@ fn method_info(env: &mut rvmti::JvmtiEnv, method_id: &rvmti::JMethodId) -> Resul
     } else {
         None
     };
-    let method_info = Arc::new(MethodInfo{name, class, native_method, line_numbers});
-    METHOD_INFO_CACHE.insert((*method_id).clone(), method_info.clone());
+    let method_info = MethodInfo{name, class, native_method, line_numbers};
     Ok(method_info)
 }
 
-fn class_info(env: &mut rvmti::JvmtiEnv, class_id: &rvmti::JClass) -> Result<Arc<ClassInfo>, ClassInfoError> {
-    let cached = CLASS_INFO_CACHE.get(class_id);
-    match cached {
-        Some(hit) => return Ok((*hit).clone()),
-        None => {},
-    }
+fn class_info(env: &mut rvmti::JvmtiEnv, class_id: &rvmti::JClass) -> Result<ClassInfo, ClassInfoError> {
     let signature = env.get_class_signature(class_id)
         .map_err(ClassInfoError::UnableToGetClassSignature)?;
     let source_file_name = env.get_source_file_name(class_id)
         .map_err(ClassInfoError::UnableToGetClassSourceFileName)?;
-    let class_info = Arc::new(ClassInfo{signature, source_file_name});
-    CLASS_INFO_CACHE.insert((*class_id).clone(), class_info.clone());
+    let class_info = ClassInfo{signature, source_file_name};
     Ok(class_info)
+}
+
+fn stack_info(env: &mut rvmti::JvmtiEnv, compile_info: &Option<Vec<rvmti::CompiledMethodLoadRecord>>)
+    -> Result<Option<Vec<StackInfo>>, StackInfoError>
+{
+    match compile_info {
+        &Some(ref infos) => {
+            let mut result = Vec::new();
+            for info in infos.iter() {
+                match info {
+                    &rvmti::CompiledMethodLoadRecord::Inline{ref stack_infos} => {
+                        for stack_info in stack_infos.iter() {
+                            let mut stack_frame_infos: Vec<StackFrameInfo> = Vec::new();
+                            for stack_frame in stack_info.stack_frames.iter() {
+                                let method_info = method_info(env, &stack_frame.method_id)
+                                    .map_err(StackInfoError::UnableToGetMethodInfo)?;
+                                stack_frame_infos.push(StackFrameInfo{method: method_info,
+                                    byte_code_index: stack_frame.byte_code_index});
+                            }
+                            result.push(StackInfo{pc_address: stack_info.pc_address, stack_frames: stack_frame_infos});
+                        }
+                    },
+                    _ => {},
+                }
+            }
+            return Ok(Some(result));
+        },
+        &None => Ok(None),
+    }
 }

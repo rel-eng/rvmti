@@ -395,12 +395,12 @@ pub struct JThread {
     thread: rvmti_sys::jthread,
 }
 
-#[derive(Debug, Hash, Eq, PartialEq, Clone)]
+#[derive(Debug)]
 pub struct JMethodId {
     method: rvmti_sys::jmethodID,
 }
 
-#[derive(Debug, Hash, Eq, PartialEq, Clone)]
+#[derive(Debug)]
 pub struct JClass {
     class: rvmti_sys::jclass,
 }

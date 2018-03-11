@@ -12,7 +12,6 @@ env_logger = "0.5.5"
 failure = "0.1.1"
 failure_derive = "0.1.1"
 backtrace = "0.3.5"
-chashmap = "2.2.0"
 
 [dependencies.rvmti-sys]
 path = "rvmti-sys"
