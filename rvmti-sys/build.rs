@@ -165,6 +165,7 @@ fn main() {
         .whitelist_function("jvmti_env_get_class_signature")
         .whitelist_function("jvmti_env_get_source_file_name")
         .whitelist_function("jvmti_env_get_line_number_table")
+        .whitelist_function("jvmti_env_is_method_native")
         .parse_callbacks(Box::new(MacroCallback {}))
         .generate()
         .expect("Unable to generate bindings");

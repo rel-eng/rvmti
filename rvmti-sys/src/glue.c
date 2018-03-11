@@ -924,6 +924,10 @@ jvmtiError jvmti_env_get_line_number_table(jvmtiEnv* env, jmethodID method, jint
     return (*env)->GetLineNumberTable(env, method, entry_count_ptr, table_ptr);
 }
 
+jvmtiError jvmti_env_is_method_native(jvmtiEnv* env, jmethodID method, jboolean* is_native_ptr) {
+    return (*env)->IsMethodNative(env, method, is_native_ptr);
+}
+
 #ifdef __cplusplus
 }
 #endif

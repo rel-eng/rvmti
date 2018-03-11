@@ -14,10 +14,14 @@ extern crate log;
 extern crate failure;
 #[macro_use]
 extern crate failure_derive;
+extern crate chashmap;
 
 use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::sync::MutexGuard;
+use std::sync::Arc;
+
+use chashmap::CHashMap;
 
 pub use rvmti::Agent_OnLoad;
 pub use rvmti::Agent_OnUnload;
@@ -55,6 +59,8 @@ pub use rvmti::jvmti_event_vm_start_handler;
 
 lazy_static! {
     static ref JVMTI_ENVIRONMENTS: Mutex<Vec<rvmti::JvmtiEnv>> = Mutex::new(Vec::new());
+    static ref METHOD_INFO_CACHE: CHashMap<rvmti::JMethodId, Arc<MethodInfo>> = CHashMap::new();
+    static ref CLASS_INFO_CACHE: CHashMap<rvmti::JClass, Arc<ClassInfo>> = CHashMap::new();
 }
 
 pub fn agent_on_load(vm: &rvmti::Jvm, options: &Option<String>) -> i32 {
@@ -86,6 +92,8 @@ pub fn agent_on_unload(vm: &rvmti::Jvm) {
             warn!("Failed to lock environments global storage: {}", err);
         }
     }
+    CLASS_INFO_CACHE.clear();
+    METHOD_INFO_CACHE.clear();
     info!("Agent unloaded");
 }
 
@@ -202,7 +210,8 @@ impl<'a> From<PoisonError<MutexGuard<'a, Vec<rvmti::JvmtiEnv>>>> for AgentInitEr
 #[derive(Debug)]
 struct MethodInfo {
     name: rvmti::MethodName,
-    class: ClassInfo,
+    class: Arc<ClassInfo>,
+    native_method: bool,
     line_numbers: Option<Vec<rvmti::LineNumberEntry>>,
 }
 
@@ -210,6 +219,12 @@ struct MethodInfo {
 struct ClassInfo {
     signature: rvmti::ClassSignature,
     source_file_name: Option<String>,
+}
+
+#[derive(Debug)]
+struct StackFrameInfo {
+    method: MethodInfo,
+    byte_code_index: i32,
 }
 
 #[derive(Fail, Debug)]
@@ -220,6 +235,8 @@ enum MethodInfoError {
     UnableToGetMethodDeclaringClass(#[cause] rvmti::JvmtiError),
     #[fail(display = "Failed to obtain method declaring class info: {}", _0)]
     UnableToGetDeclaringClassInfo(#[cause] ClassInfoError),
+    #[fail(display = "Failed to check if method is native: {}", _0)]
+    UnableToCheckIfMethodIsNative(#[cause] rvmti::JvmtiError),
     #[fail(display = "Failed to obtain method line numbers: {}", _0)]
     UnableToGetMethodLineNumbers(#[cause] rvmti::JvmtiError),
 }
@@ -232,22 +249,41 @@ enum ClassInfoError {
     UnableToGetClassSourceFileName(#[cause] rvmti::GetSourceFileNameError),
 }
 
-fn method_info(env: &mut rvmti::JvmtiEnv, method_id: &rvmti::JMethodId) -> Result<MethodInfo, MethodInfoError> {
+fn method_info(env: &mut rvmti::JvmtiEnv, method_id: &rvmti::JMethodId) -> Result<Arc<MethodInfo>, MethodInfoError> {
+    let cached = METHOD_INFO_CACHE.get(method_id);
+    match cached {
+        Some(hit) => return Ok((*hit).clone()),
+        None => {},
+    }
     let name = env.get_method_name(&method_id)
         .map_err(MethodInfoError::UnableToGetMethodName)?;
     let declaring_class_id = env.get_method_declaring_class(&method_id)
         .map_err(MethodInfoError::UnableToGetMethodDeclaringClass)?;
     let class = class_info(env, &declaring_class_id)
         .map_err(MethodInfoError::UnableToGetDeclaringClassInfo)?;
-    let line_numbers = env.get_line_number_table(&method_id)
-        .map_err(MethodInfoError::UnableToGetMethodLineNumbers)?;
-    Ok(MethodInfo{name, class, line_numbers})
+    let native_method = env.check_is_method_native(method_id)
+        .map_err(MethodInfoError::UnableToCheckIfMethodIsNative)?;
+    let line_numbers = if !native_method {
+        env.get_line_number_table(&method_id).map_err(MethodInfoError::UnableToGetMethodLineNumbers)?
+    } else {
+        None
+    };
+    let method_info = Arc::new(MethodInfo{name, class, native_method, line_numbers});
+    METHOD_INFO_CACHE.insert((*method_id).clone(), method_info.clone());
+    Ok(method_info)
 }
 
-fn class_info(env: &mut rvmti::JvmtiEnv, class_id: &rvmti::JClass) -> Result<ClassInfo, ClassInfoError> {
+fn class_info(env: &mut rvmti::JvmtiEnv, class_id: &rvmti::JClass) -> Result<Arc<ClassInfo>, ClassInfoError> {
+    let cached = CLASS_INFO_CACHE.get(class_id);
+    match cached {
+        Some(hit) => return Ok((*hit).clone()),
+        None => {},
+    }
     let signature = env.get_class_signature(class_id)
         .map_err(ClassInfoError::UnableToGetClassSignature)?;
     let source_file_name = env.get_source_file_name(class_id)
         .map_err(ClassInfoError::UnableToGetClassSourceFileName)?;
-    Ok(ClassInfo{signature, source_file_name})
+    let class_info = Arc::new(ClassInfo{signature, source_file_name});
+    CLASS_INFO_CACHE.insert((*class_id).clone(), class_info.clone());
+    Ok(class_info)
 }

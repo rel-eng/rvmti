@@ -373,6 +373,12 @@ pub struct JvmtiEnv {
 
 // Required for global thread-safe store of initialized environments
 unsafe impl Send for JvmtiEnv {}
+// Required for global concurrent cache of methods metadata
+unsafe impl Send for JMethodId {}
+unsafe impl Sync for JMethodId {}
+// Required for global concurrent cache of classes metadata
+unsafe impl Send for JClass {}
+unsafe impl Sync for JClass {}
 
 #[derive(Debug)]
 pub struct JvmtiCapabilities {
@@ -389,12 +395,12 @@ pub struct JThread {
     thread: rvmti_sys::jthread,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub struct JMethodId {
     method: rvmti_sys::jmethodID,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub struct JClass {
     class: rvmti_sys::jclass,
 }
@@ -817,6 +823,19 @@ impl JvmtiEnv {
             }
         }
     }
+
+    pub fn check_is_method_native(&mut self, method: &JMethodId) -> Result<bool, JvmtiError> {
+        unsafe {
+            let mut is_native: rvmti_sys::jboolean = 0 as rvmti_sys::jboolean;
+            let result = rvmti_sys::jvmti_env_is_method_native(self.env, method.method, &mut is_native);
+            if result == rvmti_sys::jvmtiError_JVMTI_ERROR_NONE {
+                return Ok(is_native != 0);
+            } else {
+                return Err(JvmtiError::from(result));
+            }
+        }
+    }
+
 }
 
 impl Drop for JvmtiEnv {

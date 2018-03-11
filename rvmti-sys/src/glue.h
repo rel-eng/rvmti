@@ -449,6 +449,8 @@ jvmtiError jvmti_env_get_source_file_name(jvmtiEnv* env, jclass klass, char** so
 
 jvmtiError jvmti_env_get_line_number_table(jvmtiEnv* env, jmethodID method, jint* entry_count_ptr, jvmtiLineNumberEntry** table_ptr);
 
+jvmtiError jvmti_env_is_method_native(jvmtiEnv* env, jmethodID method, jboolean* is_native_ptr);
+
 #ifdef __cplusplus
 }
 #endif
