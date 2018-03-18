@@ -373,12 +373,6 @@ pub struct JvmtiEnv {
 
 // Required for global thread-safe store of initialized environments
 unsafe impl Send for JvmtiEnv {}
-// Required for global concurrent cache of methods metadata
-unsafe impl Send for JMethodId {}
-unsafe impl Sync for JMethodId {}
-// Required for global concurrent cache of classes metadata
-unsafe impl Send for JClass {}
-unsafe impl Sync for JClass {}
 
 #[derive(Debug)]
 pub struct JvmtiCapabilities {
@@ -426,7 +420,7 @@ pub struct LineNumberEntry {
     pub line_number: i32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AddressLocationEntry {
     pub start_address: usize,
     pub location: JLocation,

@@ -6,6 +6,7 @@
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 mod rvmti;
+mod perf;
 
 #[macro_use]
 extern crate lazy_static;
@@ -18,6 +19,8 @@ extern crate failure_derive;
 use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::sync::MutexGuard;
+use std::thread::{self, JoinHandle};
+use std::sync::mpsc::{channel, Sender, Receiver};
 
 pub use rvmti::Agent_OnLoad;
 pub use rvmti::Agent_OnUnload;
@@ -54,7 +57,7 @@ pub use rvmti::jvmti_event_vm_object_alloc_handler;
 pub use rvmti::jvmti_event_vm_start_handler;
 
 lazy_static! {
-    static ref JVMTI_ENVIRONMENTS: Mutex<Vec<rvmti::JvmtiEnv>> = Mutex::new(Vec::new());
+    static ref AGENT_ENV: Mutex<Option<AgentEnv>> = Mutex::new(None);
 }
 
 pub fn agent_on_load(vm: &rvmti::Jvm, options: &Option<String>) -> i32 {
@@ -74,16 +77,20 @@ pub fn agent_on_load(vm: &rvmti::Jvm, options: &Option<String>) -> i32 {
 
 pub fn agent_on_unload(vm: &rvmti::Jvm) {
     info!("Agent unloading...");
-    match JVMTI_ENVIRONMENTS.lock() {
+    match AGENT_ENV.lock() {
         Ok(mut guard) => {
-            for mut env in guard.as_mut_slice() {
-                unload_environment(&mut env);
+            match guard.take() {
+                Some(ref mut env) => {
+                    unload_environment(&mut env.env);
+                },
+                None => {
+                    warn!("Agent was not initialized, skipping shutdown");
+                }
             }
-            guard.clear();
             debug!("Environments freed");
         },
         Err(err) => {
-            warn!("Failed to lock environments global storage: {}", err);
+            warn!("Failed to lock agent environment for unloading: {}", err);
         }
     }
     info!("Agent unloaded");
@@ -95,50 +102,85 @@ pub fn jvmti_event_compiled_method_load(env: &mut rvmti::JvmtiEnv, method_id: &r
 {
     // Agent_OnUnload may be called while this handler is still running so some methods calls may fail, even Deallocate calls
     // It does not look like a huge problem as Agent_OnUnload is called on JVM shutdown anyway
-    // Lock on the environment would prevent this but then all handlers would be executed serially which is undesirable
-    // Maybe name resolution can be moved to the dedicated thread using some lock-free queue...
     let method_info = method_info(env, method_id);
     match method_info {
         Ok(info) => {
             let stack_info = stack_info(env, compile_info);
             match stack_info {
                 Ok(stack_info_value) => {
-                    info!("'Compiled method load' event fired: {:?}, {:?}, {:?}, 0x{:x}, {}, {:?}, {:?}, {:?}",
-                          info.name, info.class.signature, info.class.source_file_name, address, length,
-                          info.line_numbers, address_locations, stack_info_value);
+                    match AGENT_ENV.lock() {
+                        Ok(mut guard) => {
+                            match *guard {
+                                Some(ref mut env) => {
+                                    env.compiled_method_load(info.name, info.class.signature,
+                                                             info.class.source_file_name, address, length,
+                                                             info.line_numbers, address_locations.clone(),
+                                                             stack_info_value);
+                                },
+                                None => {
+                                    warn!("Agent was not initialized, skipping dynamic code generation event");
+                                }
+                            }
+                        },
+                        Err(err) => {
+                            warn!("Failed to lock agent environment for event processing: {}", err);
+                        }
+                    }
                 },
                 Err(e) => {
-                    info!("'Compiled method load' event fired: {:?}, {:?}, {:?}, 0x{:x}, {}, {:?}, {:?}, {:?}",
-                          info.name, info.class.signature, info.class.source_file_name, address, length,
-                          info.line_numbers, address_locations, compile_info);
                     error!("Failed to process method inlining info: {}", e);
                 }
             }
         },
         Err(e) => {
-            info!("'Compiled method load' event fired: {:?}, 0x{:x}, {}, {:?}, {:?}",
-                  method_id, address, length, address_locations, compile_info);
             error!("Failed to get compiled method info: {}", e);
         }
     }
 }
 
 pub fn jvmti_event_dynamic_code_generated(env: &mut rvmti::JvmtiEnv, name: &Option<String>, address: usize, length: usize) {
-    info!("'Dynamic code generated' event fired: {}, 0x{:x}, {}", name.as_ref().unwrap_or(&"".to_string()), address, length);
+    match AGENT_ENV.lock() {
+        Ok(mut guard) => {
+            match *guard {
+                Some(ref mut env) => {
+                    env.dynamic_code_generated(name, address, length);
+                },
+                None => {
+                    warn!("Agent was not initialized, skipping dynamic code generation event");
+                }
+            }
+        },
+        Err(err) => {
+            warn!("Failed to lock agent environment for event processing: {}", err);
+        }
+    }
 }
 
 fn unload_environment(env: &mut rvmti::JvmtiEnv) {
 }
 
 fn do_on_load<'a>(vm: &rvmti::Jvm, options: &Option<String>) -> Result<(), AgentInitError> {
-    let mut jvmti_env = vm.get_jvmti_env(rvmti::JvmtiVersion::CurrentVersion)
-        .map_err(|e| AgentInitError::UnableToObtainJvmtiEnvironment(e))?;
-    debug!("Environment obtained");
-    {
-        let mut guard = JVMTI_ENVIRONMENTS.lock().map_err(AgentInitError::from)?;
-        let initialization_result = initialize_agent(&mut jvmti_env, &options);
-        guard.push(jvmti_env);
-        return initialization_result;
+    let mut guard = AGENT_ENV.lock().map_err(AgentInitError::from)?;
+    return match *guard {
+        Some(_) => {
+            warn!("Agent was already initialized, skipping initialization");
+            Ok(())
+        },
+        None => {
+            let mut jvmti_env = vm.get_jvmti_env(rvmti::JvmtiVersion::CurrentVersion)
+                .map_err(AgentInitError::UnableToObtainJvmtiEnvironment)?;
+            debug!("Environment obtained");
+            let _ = initialize_agent(&mut jvmti_env, &options)?;
+            debug!("Agent environment successfully initialized");
+            let dump_dir = perf::create_dump_dir()
+                .map_err(AgentInitError::UnableToCreateDumpDir)?;
+            debug!("Jit dump directory created");
+            let dump_file = perf::DumpFile::new(dump_dir)
+                .map_err(AgentInitError::UnableToCreateDumpFile)?;
+            debug!("Jit dump file created");
+            *guard = Some(AgentEnv::new(jvmti_env, dump_file));
+            Ok(())
+        }
     }
 }
 
@@ -184,84 +226,143 @@ fn enable_events<'a>(env: &mut rvmti::JvmtiEnv) -> Result<(), AgentInitError> {
     Ok(())
 }
 
-#[derive(Fail, Debug)]
-enum AgentInitError {
-    #[fail(display = "Failed to allocate capabilities: {}", _0)]
-    UnableToAllocateCapabilities(#[cause] rvmti::AllocError),
-    #[fail(display = "Failed to add capabilities: {}", _0)]
-    UnableToAddCapabilities(#[cause] rvmti::JvmtiError),
-    #[fail(display = "Failed to allocate event callback settings: {}", _0)]
-    UnableToAllocateEventCallbackSettings(#[cause] rvmti::AllocError),
-    #[fail(display = "Failed to set event callbacks: {}", _0)]
-    UnableToSetEventCallbacks(#[cause] rvmti::JvmtiError),
-    #[fail(display = "Failed to enable events: {}", _0)]
-    UnableToEnableEvents(#[cause] rvmti::JvmtiError),
-    #[fail(display = "Failed to obtain jvmti environment: {}", _0)]
-    UnableToObtainJvmtiEnvironment(#[cause] rvmti::JniError),
-    #[fail(display = "The mutex was poisoned")]
-    PoisonedMutexError,
+impl AgentEnv {
+
+    fn new(env: rvmti::JvmtiEnv, dump_file: perf::DumpFile) -> AgentEnv {
+        debug!("Spawning agent worker thread...");
+        let (sender, receiver) = channel();
+        let worker = thread::spawn(move|| {
+            debug!("Agent worker thread running...");
+            run_worker(receiver, dump_file);
+        });
+        debug!("Agent worker thread spawned");
+        AgentEnv{env, sender, worker: Some(worker)}
+    }
+
+    fn dynamic_code_generated(&mut self, name: &Option<String>, address: usize, length: usize) {
+        match self.sender.send(AgentMessage::DynamicCodeGenerated {name: name.clone(), address, length}) {
+            Ok(_) => {},
+            Err(e) => {
+                error!("Failed to send dynamic code generation event to worker thread: {}", e);
+            },
+        };
+    }
+
+    fn compiled_method_load(&mut self, name: rvmti::MethodName, class_signature: rvmti::ClassSignature,
+                            class_source_file_name: Option<String>, address: usize, length: usize,
+                            line_numbers: Option<Vec<rvmti::LineNumberEntry>>,
+                            address_locations: Option<Vec<rvmti::AddressLocationEntry>>,
+                            stack_info: Option<Vec<StackInfo>>)
+    {
+        match self.sender.send(AgentMessage::CompiledMethodLoad {name, class_signature, class_source_file_name,
+            address, length, line_numbers, address_locations, stack_info})
+        {
+            Ok(_) => {},
+            Err(e) => {
+                error!("Failed to send dynamic code generation event to worker thread: {}", e);
+            },
+        };
+    }
 }
 
-impl<'a> From<PoisonError<MutexGuard<'a, Vec<rvmti::JvmtiEnv>>>> for AgentInitError {
+impl Drop for AgentEnv {
 
-    fn from(_error: PoisonError<MutexGuard<'a, Vec<rvmti::JvmtiEnv>>>) -> AgentInitError {
-        AgentInitError::PoisonedMutexError
+    fn drop(&mut self) {
+        debug!("Stopping agent worker thread...");
+        let send_shutdown_result = self.sender.send(AgentMessage::Shutdown);
+        match send_shutdown_result {
+            Ok(_) => {},
+            Err(e) => {
+                error!("Failed to send shutdown request to agent worker thread: {}", e)
+            },
+        };
+        match self.worker.take() {
+            Some(w) => {
+                let worker_thread_result = w.join();
+                match worker_thread_result {
+                    Ok(_) => {},
+                    Err(e) => {
+                        error!("Failed to wait for worker thread shutdown: {:?}", e);
+                    }
+                }
+            },
+            None => {},
+        }
+        debug!("Agent worker thread stopped");
     }
 
 }
 
-#[derive(Debug)]
-struct MethodInfo {
-    name: rvmti::MethodName,
-    class: ClassInfo,
-    native_method: bool,
-    line_numbers: Option<Vec<rvmti::LineNumberEntry>>,
+fn run_worker(receiver: Receiver<AgentMessage>, mut dump_file: perf::DumpFile) {
+    match dump_file.write_header() {
+        Ok(_) => {},
+        Err(e) => {
+            error!("Failed to write jit dump header: {}", e);
+        },
+    }
+    let mut code_index = 0u64;
+    loop {
+        match receiver.recv() {
+            Ok(message) => {
+                match message {
+                    AgentMessage::DynamicCodeGenerated { name, address, length } => {
+                        debug!("'Dynamic code generated' event fired: {}, 0x{:x}, {}",
+                              name.as_ref().unwrap_or(&"".to_string()), address, length);
+                        if name.is_some() && address != 0 as usize && length > 0 as usize {
+                            match dump_file.write_jit_code_load(name.unwrap(), address, length, code_index) {
+                                Ok(_) => {},
+                                Err(e) => {
+                                    error!("Failed to write jit code load record for dynamically generated code: {}", e);
+                                }
+                            }
+                            code_index += 1u64;
+                        }
+                    },
+                    AgentMessage::CompiledMethodLoad { name, class_signature, class_source_file_name,
+                        address, length, line_numbers, address_locations, stack_info } => {
+                        debug!("'Compiled method load' event fired: {:?}, {:?}, {:?}, 0x{:x}, {}, {:?}, {:?}, {:?}",
+                              name, class_signature, class_source_file_name, address, length,
+                              line_numbers, address_locations, stack_info);
+                        if address != 0 as usize && length > 0 as usize {
+                            match dump_file.write_compiled_method_load(name, class_signature,
+                                                                       class_source_file_name,
+                                                                       address, length, line_numbers,
+                                                                       address_locations, stack_info,
+                                                                       code_index) {
+                                Ok(_) => {},
+                                Err(e) => {
+                                    error!("Failed to write jit code load record for compiled method: {}", e);
+                                }
+                            }
+                            code_index += 1u64;
+                        }
+                    }
+                    AgentMessage::Shutdown => {
+                        debug!("Received shutdown request for agent worker thread...");
+                        break;
+                    },
+                }
+            },
+            Err(e) => {
+                error!("Agent message bus was shutdown unexpectedly: {}", e);
+                break;
+            }
+        }
+    }
+    match dump_file.write_code_close_record() {
+        Ok(_) => {},
+        Err(e) => {
+            error!("Failed to write jit dump code close record: {}", e);
+        },
+    }
 }
 
-#[derive(Debug)]
-struct ClassInfo {
-    signature: rvmti::ClassSignature,
-    source_file_name: Option<String>,
-}
+impl<'a> From<PoisonError<MutexGuard<'a, Option<AgentEnv>>>> for AgentInitError {
 
-#[derive(Debug)]
-struct StackFrameInfo {
-    method: MethodInfo,
-    byte_code_index: i32,
-}
+    fn from(_error: PoisonError<MutexGuard<'a, Option<AgentEnv>>>) -> AgentInitError {
+        AgentInitError::PoisonedMutexError
+    }
 
-#[derive(Debug)]
-struct StackInfo {
-    pc_address: usize,
-    stack_frames: Vec<StackFrameInfo>,
-}
-
-#[derive(Fail, Debug)]
-enum MethodInfoError {
-    #[fail(display = "Failed to obtain method name: {}", _0)]
-    UnableToGetMethodName(#[cause] rvmti::GetMethodNameError),
-    #[fail(display = "Failed to obtain method declaring class id: {}", _0)]
-    UnableToGetMethodDeclaringClass(#[cause] rvmti::JvmtiError),
-    #[fail(display = "Failed to obtain method declaring class info: {}", _0)]
-    UnableToGetDeclaringClassInfo(#[cause] ClassInfoError),
-    #[fail(display = "Failed to check if method is native: {}", _0)]
-    UnableToCheckIfMethodIsNative(#[cause] rvmti::JvmtiError),
-    #[fail(display = "Failed to obtain method line numbers: {}", _0)]
-    UnableToGetMethodLineNumbers(#[cause] rvmti::JvmtiError),
-}
-
-#[derive(Fail, Debug)]
-enum ClassInfoError {
-    #[fail(display = "Failed to obtain class signature: {}", _0)]
-    UnableToGetClassSignature(#[cause] rvmti::GetClassSignatureError),
-    #[fail(display = "Failed to obtain class source file name: {}", _0)]
-    UnableToGetClassSourceFileName(#[cause] rvmti::GetSourceFileNameError),
-}
-
-#[derive(Fail, Debug)]
-enum StackInfoError {
-    #[fail(display = "Failed to obtain method metadata: {}", _0)]
-    UnableToGetMethodInfo(#[cause] MethodInfoError),
 }
 
 fn method_info(env: &mut rvmti::JvmtiEnv, method_id: &rvmti::JMethodId) -> Result<MethodInfo, MethodInfoError> {
@@ -318,4 +419,96 @@ fn stack_info(env: &mut rvmti::JvmtiEnv, compile_info: &Option<Vec<rvmti::Compil
         },
         &None => Ok(None),
     }
+}
+
+#[derive(Debug)]
+enum AgentMessage {
+    Shutdown,
+    DynamicCodeGenerated { name: Option<String>, address: usize, length: usize },
+    CompiledMethodLoad { name: rvmti::MethodName, class_signature: rvmti::ClassSignature, class_source_file_name: Option<String>,
+        address: usize, length: usize, line_numbers: Option<Vec<rvmti::LineNumberEntry>>,
+        address_locations: Option<Vec<rvmti::AddressLocationEntry>>, stack_info: Option<Vec<StackInfo>> },
+}
+
+#[derive(Debug)]
+struct AgentEnv {
+    env: rvmti::JvmtiEnv,
+    sender: Sender<AgentMessage>,
+    worker: Option<JoinHandle<()>>,
+}
+
+#[derive(Debug)]
+pub struct MethodInfo {
+    name: rvmti::MethodName,
+    class: ClassInfo,
+    native_method: bool,
+    line_numbers: Option<Vec<rvmti::LineNumberEntry>>,
+}
+
+#[derive(Debug)]
+pub struct ClassInfo {
+    signature: rvmti::ClassSignature,
+    source_file_name: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct StackFrameInfo {
+    method: MethodInfo,
+    byte_code_index: i32,
+}
+
+#[derive(Debug)]
+pub struct StackInfo {
+    pc_address: usize,
+    stack_frames: Vec<StackFrameInfo>,
+}
+
+#[derive(Fail, Debug)]
+enum AgentInitError {
+    #[fail(display = "Failed to allocate capabilities: {}", _0)]
+    UnableToAllocateCapabilities(#[cause] rvmti::AllocError),
+    #[fail(display = "Failed to add capabilities: {}", _0)]
+    UnableToAddCapabilities(#[cause] rvmti::JvmtiError),
+    #[fail(display = "Failed to allocate event callback settings: {}", _0)]
+    UnableToAllocateEventCallbackSettings(#[cause] rvmti::AllocError),
+    #[fail(display = "Failed to set event callbacks: {}", _0)]
+    UnableToSetEventCallbacks(#[cause] rvmti::JvmtiError),
+    #[fail(display = "Failed to enable events: {}", _0)]
+    UnableToEnableEvents(#[cause] rvmti::JvmtiError),
+    #[fail(display = "Failed to obtain jvmti environment: {}", _0)]
+    UnableToObtainJvmtiEnvironment(#[cause] rvmti::JniError),
+    #[fail(display = "The mutex was poisoned")]
+    PoisonedMutexError,
+    #[fail(display = "Failed to create jit dump directory: {}", _0)]
+    UnableToCreateDumpDir(#[cause] perf::CreteDumpDirError),
+    #[fail(display = "Failed to create jit dump file: {}", _0)]
+    UnableToCreateDumpFile(#[cause] perf::NewDumpFileError),
+}
+
+#[derive(Fail, Debug)]
+enum MethodInfoError {
+    #[fail(display = "Failed to obtain method name: {}", _0)]
+    UnableToGetMethodName(#[cause] rvmti::GetMethodNameError),
+    #[fail(display = "Failed to obtain method declaring class id: {}", _0)]
+    UnableToGetMethodDeclaringClass(#[cause] rvmti::JvmtiError),
+    #[fail(display = "Failed to obtain method declaring class info: {}", _0)]
+    UnableToGetDeclaringClassInfo(#[cause] ClassInfoError),
+    #[fail(display = "Failed to check if method is native: {}", _0)]
+    UnableToCheckIfMethodIsNative(#[cause] rvmti::JvmtiError),
+    #[fail(display = "Failed to obtain method line numbers: {}", _0)]
+    UnableToGetMethodLineNumbers(#[cause] rvmti::JvmtiError),
+}
+
+#[derive(Fail, Debug)]
+enum ClassInfoError {
+    #[fail(display = "Failed to obtain class signature: {}", _0)]
+    UnableToGetClassSignature(#[cause] rvmti::GetClassSignatureError),
+    #[fail(display = "Failed to obtain class source file name: {}", _0)]
+    UnableToGetClassSourceFileName(#[cause] rvmti::GetSourceFileNameError),
+}
+
+#[derive(Fail, Debug)]
+enum StackInfoError {
+    #[fail(display = "Failed to obtain method metadata: {}", _0)]
+    UnableToGetMethodInfo(#[cause] MethodInfoError),
 }
