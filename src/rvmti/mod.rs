@@ -735,15 +735,15 @@ impl JvmtiEnv {
             let mut generic_signature_ptr: *mut ::std::os::raw::c_char = ptr::null_mut();
             let result = rvmti_sys::jvmti_env_get_method_name(
                 self.env, method.method, &mut name_ptr, &mut signature_ptr, &mut generic_signature_ptr);
-            let name = name_ptr.as_mut().map(|v| VmOwnedString {ptr:v, env: &self});
-            let signature = signature_ptr.as_mut().map(|v| VmOwnedString {ptr: v, env: &self});
-            let generic_signature = generic_signature_ptr.as_mut().map(|v| VmOwnedString {ptr: v, env: &self});
+            let name = name_ptr.as_ref().map(|v| VmOwnedString {ptr:v, env: &self});
+            let signature = signature_ptr.as_ref().map(|v| VmOwnedString {ptr: v, env: &self});
+            let generic_signature = generic_signature_ptr.as_ref().map(|v| VmOwnedString {ptr: v, env: &self});
             if result == rvmti_sys::jvmtiError_JVMTI_ERROR_NONE {
-                let name_string = name.map_or_else(|| Ok("".to_string()), |s| s.to_string()
+                let name_string = name.as_ref().map_or_else(|| Ok("".to_string()), |s| s.to_string()
                     .map(|v| v.unwrap_or_else(|| "".to_string()))).map_err(|e| GetMethodNameError::NameDecodeError(e))?;
-                let signature_string = signature.map_or_else(|| Ok("".to_string()), |s| s.to_string()
+                let signature_string = signature.as_ref().map_or_else(|| Ok("".to_string()), |s| s.to_string()
                     .map(|v| v.unwrap_or_else(|| "".to_string()))).map_err(|e| GetMethodNameError::SignatureDecodeError(e))?;
-                let generic_signature_string = generic_signature.map_or_else(|| Ok(None), |s| s.to_string()
+                let generic_signature_string = generic_signature.as_ref().map_or_else(|| Ok(None), |s| s.to_string()
                     .map_err(|e| GetMethodNameError::GenericSignatureDecodeError(e)))?;
                 return Ok(MethodName{name: name_string, signature: signature_string, generic_signature: generic_signature_string});
             } else {
@@ -770,12 +770,12 @@ impl JvmtiEnv {
             let mut generic_signature_ptr: *mut ::std::os::raw::c_char = ptr::null_mut();
             let result = rvmti_sys::jvmti_env_get_class_signature(
                 self.env, class.class, &mut signature_ptr, &mut generic_signature_ptr);
-            let signature = signature_ptr.as_mut().map(|v| VmOwnedString {ptr: v, env: &self});
-            let generic_signature = generic_signature_ptr.as_mut().map(|v| VmOwnedString {ptr: v, env: &self});
+            let signature = signature_ptr.as_ref().map(|v| VmOwnedString {ptr: v, env: &self});
+            let generic_signature = generic_signature_ptr.as_ref().map(|v| VmOwnedString {ptr: v, env: &self});
             if result == rvmti_sys::jvmtiError_JVMTI_ERROR_NONE {
-                let signature_string = signature.map_or_else(|| Ok("".to_string()), |s| s.to_string()
+                let signature_string = signature.as_ref().map_or_else(|| Ok("".to_string()), |s| s.to_string()
                     .map(|v| v.unwrap_or_else(|| "".to_string()))).map_err(|e| GetClassSignatureError::SignatureDecodeError(e))?;
-                let generic_signature_string = generic_signature.map_or_else(|| Ok(None), |s| s.to_string()
+                let generic_signature_string = generic_signature.as_ref().map_or_else(|| Ok(None), |s| s.to_string()
                     .map_err(|e| GetClassSignatureError::GenericSignatureDecodeError(e)))?;
                 return Ok(ClassSignature{signature: signature_string, generic_signature: generic_signature_string});
             } else {
@@ -788,9 +788,9 @@ impl JvmtiEnv {
         unsafe {
             let mut source_name_ptr: *mut ::std::os::raw::c_char = ptr::null_mut();
             let result = rvmti_sys::jvmti_env_get_source_file_name(self.env, class.class, &mut source_name_ptr);
-            let source_name = source_name_ptr.as_mut().map(|v| VmOwnedString {ptr: v, env: &self});
+            let source_name = source_name_ptr.as_ref().map(|v| VmOwnedString {ptr: v, env: &self});
             if result == rvmti_sys::jvmtiError_JVMTI_ERROR_NONE {
-                let source_name_string = source_name.map_or_else(|| Ok(None), |s| s.to_string()
+                let source_name_string = source_name.as_ref().map_or_else(|| Ok(None), |s| s.to_string()
                     .map_err(|e| GetSourceFileNameError::SourceFileNameDecodeError(e)))?;
                 return Ok(source_name_string);
             } else if result == rvmti_sys::jvmtiError_JVMTI_ERROR_ABSENT_INFORMATION {
@@ -806,9 +806,9 @@ impl JvmtiEnv {
             let mut entry_count: rvmti_sys::jint = 0 as rvmti_sys::jint;
             let mut table_ptr: *mut rvmti_sys::jvmtiLineNumberEntry = ptr::null_mut();
             let result = rvmti_sys::jvmti_env_get_line_number_table(self.env, method.method, &mut entry_count, &mut table_ptr);
-            let table = table_ptr.as_mut().map(|v| VmOwnedLineNumberTable{ptr:v, entry_count: entry_count, env: &self});
+            let table = table_ptr.as_ref().map(|v| VmOwnedLineNumberTable{ptr:v, entry_count: entry_count, env: &self});
             if result == rvmti_sys::jvmtiError_JVMTI_ERROR_NONE {
-                return Ok(table.and_then(|t| t.as_line_number_slice()).map(|t| t.iter()
+                return Ok(table.as_ref().and_then(|t| t.as_line_number_slice()).map(|t| t.iter()
                     .map(|e| LineNumberEntry{start_location: e.start_location, line_number: e.line_number}).collect()));
             } else if result == rvmti_sys::jvmtiError_JVMTI_ERROR_ABSENT_INFORMATION {
                 return Ok(None);
@@ -2037,12 +2037,12 @@ enum ModifiedUtf8DecoderState {
 }
 
 struct VmOwnedString<'a> {
-    ptr: *mut ::std::os::raw::c_char,
+    ptr: *const ::std::os::raw::c_char,
     env: &'a JvmtiEnv,
 }
 
 struct VmOwnedLineNumberTable<'a> {
-    ptr: *mut rvmti_sys::jvmtiLineNumberEntry,
+    ptr: *const rvmti_sys::jvmtiLineNumberEntry,
     entry_count: rvmti_sys::jint,
     env: &'a JvmtiEnv,
 }
