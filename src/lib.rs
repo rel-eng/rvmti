@@ -15,12 +15,14 @@ extern crate log;
 extern crate failure;
 #[macro_use]
 extern crate failure_derive;
+extern crate nix;
 
 use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::sync::MutexGuard;
 use std::thread::{self, JoinHandle};
 use std::sync::mpsc::{channel, Sender, Receiver};
+use std::slice;
 
 pub use rvmti::Agent_OnLoad;
 pub use rvmti::Agent_OnUnload;
@@ -100,59 +102,55 @@ pub fn jvmti_event_compiled_method_load(env: &mut rvmti::JvmtiEnv, method_id: &r
                                         address_locations: &Option<Vec<rvmti::AddressLocationEntry>>,
                                         compile_info: &Option<Vec<rvmti::CompiledMethodLoadRecord>>, address: usize, length: usize)
 {
-    // Agent_OnUnload may be called while this handler is still running so some methods calls may fail, even Deallocate calls
-    // It does not look like a huge problem as Agent_OnUnload is called on JVM shutdown anyway
-    let method_info = method_info(env, method_id);
-    match method_info {
-        Ok(info) => {
-            let stack_info = stack_info(env, compile_info);
-            match stack_info {
-                Ok(stack_info_value) => {
-                    match AGENT_ENV.lock() {
-                        Ok(mut guard) => {
-                            match *guard {
-                                Some(ref mut env) => {
-                                    env.compiled_method_load(info.name, info.class.signature,
-                                                             info.class.source_file_name, address, length,
-                                                             info.line_numbers, address_locations.clone(),
-                                                             stack_info_value);
-                                },
-                                None => {
-                                    warn!("Agent was not initialized, skipping dynamic code generation event");
-                                }
-                            }
-                        },
-                        Err(err) => {
-                            warn!("Failed to lock agent environment for event processing: {}", err);
-                        }
-                    }
-                },
-                Err(e) => {
-                    error!("Failed to process method inlining info: {}", e);
-                }
-            }
-        },
+    match on_compiled_method_load(env, method_id, address_locations, compile_info, address, length) {
+        Ok(_) => (),
         Err(e) => {
-            error!("Failed to get compiled method info: {}", e);
+            warn!("Failed to handle compiled method load event: {}", e);
         }
     }
 }
 
 pub fn jvmti_event_dynamic_code_generated(env: &mut rvmti::JvmtiEnv, name: &Option<String>, address: usize, length: usize) {
-    match AGENT_ENV.lock() {
-        Ok(mut guard) => {
-            match *guard {
-                Some(ref mut env) => {
-                    env.dynamic_code_generated(name, address, length);
-                },
-                None => {
-                    warn!("Agent was not initialized, skipping dynamic code generation event");
-                }
-            }
-        },
-        Err(err) => {
-            warn!("Failed to lock agent environment for event processing: {}", err);
+    match on_dynamic_code_generated(env, name, address, length) {
+        Ok(_) => (),
+        Err(e) => {
+            warn!("Failed to handle dynamic code generation event: {}", e);
         }
+    }
+}
+
+fn on_compiled_method_load(env: &mut rvmti::JvmtiEnv, method_id: &rvmti::JMethodId,
+                           address_locations: &Option<Vec<rvmti::AddressLocationEntry>>,
+                           compile_info: &Option<Vec<rvmti::CompiledMethodLoadRecord>>,
+                           address: usize, length: usize) -> Result<(), CompiledMethodLoadHandlerError>
+{
+    let mut guard = AGENT_ENV.lock().map_err(|e| CompiledMethodLoadHandlerError::FailedToLockAgentEnvironment)?;
+    match *guard {
+        Some(ref mut agent_env) => {
+            let method_info = method_info(env, method_id).map_err(CompiledMethodLoadHandlerError::UnableToGetMethodInfo)?;
+            let stack_info = stack_info(env, compile_info).map_err(CompiledMethodLoadHandlerError::UnableToGetStackInfo)?;
+            let timestamp = perf::get_timestamp().map_err(CompiledMethodLoadHandlerError::UnableToGetTimestamp)?;
+            agent_env.compiled_method_load(method_info.name, method_info.class.signature,
+                                           method_info.class.source_file_name, address, length,
+                                           method_info.line_numbers, address_locations.clone(),
+                                           stack_info, timestamp);
+            Ok(())
+        },
+        None => Err(CompiledMethodLoadHandlerError::AgentNotInitialized),
+    }
+}
+
+fn on_dynamic_code_generated(env: &mut rvmti::JvmtiEnv, name: &Option<String>, address: usize,
+                             length: usize) -> Result<(), DynamicCodeGeneratedHandlerError>
+{
+    let mut guard = AGENT_ENV.lock().map_err(|e| DynamicCodeGeneratedHandlerError::FailedToLockAgentEnvironment)?;
+    match *guard {
+        Some(ref mut env) => {
+            let timestamp = perf::get_timestamp().map_err(DynamicCodeGeneratedHandlerError::UnableToGetTimestamp)?;
+            env.dynamic_code_generated(name, address, length, timestamp);
+            Ok(())
+        },
+        None => Err(DynamicCodeGeneratedHandlerError::AgentNotInitialized),
     }
 }
 
@@ -239,8 +237,11 @@ impl AgentEnv {
         AgentEnv{env, sender, worker: Some(worker)}
     }
 
-    fn dynamic_code_generated(&mut self, name: &Option<String>, address: usize, length: usize) {
-        match self.sender.send(AgentMessage::DynamicCodeGenerated {name: name.clone(), address, length}) {
+    fn dynamic_code_generated(&mut self, name: &Option<String>, address: usize, length: usize, timestamp: i64) {
+        let code = unsafe{
+            slice::from_raw_parts(address as *const u8, length)
+        };
+        match self.sender.send(AgentMessage::DynamicCodeGenerated {name: name.clone(), address, length, timestamp, code: code.to_vec()}) {
             Ok(_) => {},
             Err(e) => {
                 error!("Failed to send dynamic code generation event to worker thread: {}", e);
@@ -252,10 +253,13 @@ impl AgentEnv {
                             class_source_file_name: Option<String>, address: usize, length: usize,
                             line_numbers: Option<Vec<rvmti::LineNumberEntry>>,
                             address_locations: Option<Vec<rvmti::AddressLocationEntry>>,
-                            stack_info: Option<Vec<StackInfo>>)
+                            stack_info: Option<Vec<StackInfo>>, timestamp: i64)
     {
+        let code = unsafe{
+            slice::from_raw_parts(address as *const u8, length)
+        };
         match self.sender.send(AgentMessage::CompiledMethodLoad {name, class_signature, class_source_file_name,
-            address, length, line_numbers, address_locations, stack_info})
+            address, length, line_numbers, address_locations, stack_info, timestamp, code: code.to_vec()})
         {
             Ok(_) => {},
             Err(e) => {
@@ -305,11 +309,11 @@ fn run_worker(receiver: Receiver<AgentMessage>, mut dump_file: perf::DumpFile) {
         match receiver.recv() {
             Ok(message) => {
                 match message {
-                    AgentMessage::DynamicCodeGenerated { name, address, length } => {
+                    AgentMessage::DynamicCodeGenerated { name, address, length, timestamp, code } => {
                         debug!("'Dynamic code generated' event fired: {}, 0x{:x}, {}",
                               name.as_ref().unwrap_or(&"".to_string()), address, length);
                         if name.is_some() && address != 0 as usize && length > 0 as usize {
-                            match dump_file.write_jit_code_load(name.unwrap(), address, length, code_index) {
+                            match dump_file.write_jit_code_load(name.unwrap(), address, length, code_index, timestamp, &code) {
                                 Ok(_) => {},
                                 Err(e) => {
                                     error!("Failed to write jit code load record for dynamically generated code: {}", e);
@@ -319,7 +323,7 @@ fn run_worker(receiver: Receiver<AgentMessage>, mut dump_file: perf::DumpFile) {
                         }
                     },
                     AgentMessage::CompiledMethodLoad { name, class_signature, class_source_file_name,
-                        address, length, line_numbers, address_locations, stack_info } => {
+                        address, length, line_numbers, address_locations, stack_info, timestamp, code } => {
                         debug!("'Compiled method load' event fired: {:?}, {:?}, {:?}, 0x{:x}, {}, {:?}, {:?}, {:?}",
                               name, class_signature, class_source_file_name, address, length,
                               line_numbers, address_locations, stack_info);
@@ -328,7 +332,8 @@ fn run_worker(receiver: Receiver<AgentMessage>, mut dump_file: perf::DumpFile) {
                                                                        class_source_file_name,
                                                                        address, length, line_numbers,
                                                                        address_locations, stack_info,
-                                                                       code_index) {
+                                                                       code_index, timestamp, &code)
+                            {
                                 Ok(_) => {},
                                 Err(e) => {
                                     error!("Failed to write jit code load record for compiled method: {}", e);
@@ -424,10 +429,11 @@ fn stack_info(env: &mut rvmti::JvmtiEnv, compile_info: &Option<Vec<rvmti::Compil
 #[derive(Debug)]
 enum AgentMessage {
     Shutdown,
-    DynamicCodeGenerated { name: Option<String>, address: usize, length: usize },
+    DynamicCodeGenerated { name: Option<String>, address: usize, length: usize, timestamp: i64, code: Vec<u8> },
     CompiledMethodLoad { name: rvmti::MethodName, class_signature: rvmti::ClassSignature, class_source_file_name: Option<String>,
         address: usize, length: usize, line_numbers: Option<Vec<rvmti::LineNumberEntry>>,
-        address_locations: Option<Vec<rvmti::AddressLocationEntry>>, stack_info: Option<Vec<StackInfo>> },
+        address_locations: Option<Vec<rvmti::AddressLocationEntry>>, stack_info: Option<Vec<StackInfo>>,
+        timestamp: i64, code: Vec<u8> },
 }
 
 #[derive(Debug)]
@@ -511,4 +517,28 @@ enum ClassInfoError {
 enum StackInfoError {
     #[fail(display = "Failed to obtain method metadata: {}", _0)]
     UnableToGetMethodInfo(#[cause] MethodInfoError),
+}
+
+#[derive(Fail, Debug)]
+enum DynamicCodeGeneratedHandlerError {
+    #[fail(display = "Unable to get timestamp: {}", _0)]
+    UnableToGetTimestamp(#[cause] nix::errno::Errno),
+    #[fail(display = "Agent is not initialized")]
+    AgentNotInitialized,
+    #[fail(display = "Failed to lock agent environment")]
+    FailedToLockAgentEnvironment,
+}
+
+#[derive(Fail, Debug)]
+enum CompiledMethodLoadHandlerError {
+    #[fail(display = "Unable to get timestamp: {}", _0)]
+    UnableToGetTimestamp(#[cause] nix::errno::Errno),
+    #[fail(display = "Agent is not initialized")]
+    AgentNotInitialized,
+    #[fail(display = "Failed to lock agent environment")]
+    FailedToLockAgentEnvironment,
+    #[fail(display = "Unable to get method info: {}", _0)]
+    UnableToGetMethodInfo(#[cause] MethodInfoError),
+    #[fail(display = "Unable to get stack info: {}", _0)]
+    UnableToGetStackInfo(#[cause] StackInfoError),
 }

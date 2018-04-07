@@ -19,7 +19,6 @@ use std::path::{Path, PathBuf};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::os::unix::io::AsRawFd;
 use std::ptr;
-use std::slice;
 
 use self::byteorder::{ReadBytesExt, NativeEndian, ByteOrder};
 use self::rand::{thread_rng, Rng};
@@ -133,8 +132,8 @@ impl DumpFile {
         Ok(())
     }
 
-    pub fn write_jit_code_load(&mut self, name: String, address: usize, length: usize, code_index: u64) -> Result<(), WriteRecordError> {
-        let timestamp = get_timestamp().map_err(WriteRecordError::FailedToGetTimestamp)?;
+    pub fn write_jit_code_load(&mut self, name: String, address: usize, length: usize, code_index: u64,
+                               timestamp: i64, code: &Vec<u8>) -> Result<(), WriteRecordError> {
         let pid = get_pid();
         let tid = get_tid();
         let name_bytes = name.as_bytes();
@@ -156,9 +155,6 @@ impl DumpFile {
             length as u64, // code_size
             code_index, // code_index
         ];
-        let code = unsafe{
-            slice::from_raw_parts(address as *const u8, length)
-        };
         NativeEndian::write_u32_into(&first_record_part, &mut record[0..8]);
         NativeEndian::write_u64_into(&second_record_part, &mut record[8..16]);
         NativeEndian::write_u32_into(&third_record_part, &mut record[16..24]);
@@ -175,9 +171,8 @@ impl DumpFile {
                                       line_numbers: Option<Vec<rvmti::LineNumberEntry>>,
                                       address_locations: Option<Vec<rvmti::AddressLocationEntry>>,
                                       stack_info: Option<Vec<super::StackInfo>>,
-                                      code_index: u64) -> Result<(), WriteRecordError>
+                                      code_index: u64, timestamp: i64, code: &Vec<u8>) -> Result<(), WriteRecordError>
     {
-        let timestamp = get_timestamp().map_err(WriteRecordError::FailedToGetTimestamp)?;
         let pid = get_pid();
         let tid = get_tid();
         let combined_name = format!("{}.{}{}", class_signature.signature, name.name, name.signature);
@@ -200,9 +195,6 @@ impl DumpFile {
             length as u64, // code_size
             code_index, // code_index
         ];
-        let code = unsafe{
-            slice::from_raw_parts(address as *const u8, length)
-        };
         NativeEndian::write_u32_into(&first_record_part, &mut record[0..8]);
         NativeEndian::write_u64_into(&second_record_part, &mut record[8..16]);
         NativeEndian::write_u32_into(&third_record_part, &mut record[16..24]);
@@ -232,7 +224,7 @@ impl Drop for DumpFile {
 
 }
 
-fn get_timestamp() -> Result<i64, nix::errno::Errno> {
+pub fn get_timestamp() -> Result<i64, nix::errno::Errno> {
     let mut ts: libc::timespec = libc::timespec {tv_sec: 0, tv_nsec: 0};
     let result = unsafe {
         libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts)
