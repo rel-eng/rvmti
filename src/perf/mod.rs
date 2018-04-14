@@ -206,6 +206,203 @@ impl DumpFile {
         Ok(())
     }
 
+    pub fn write_line_numbers(&mut self, name: &rvmti::MethodName, class_signature: &rvmti::ClassSignature,
+                          class_source_file_name: &Option<String>, address: usize,
+                          line_numbers: &Option<Vec<rvmti::LineNumberEntry>>,
+                          address_locations: &Option<Vec<rvmti::AddressLocationEntry>>,
+                          stack_info: &Option<Vec<super::StackInfo>>,
+                          timestamp: i64) -> Result<(), WriteRecordError>
+    {
+        if stack_info.is_some() {
+            // Inlining info is available
+            let stack = stack_info.as_ref().unwrap();
+            if !stack.is_empty() {
+                return self.write_line_numbers_with_stack_info(stack, address, timestamp);
+            }
+            return Ok(());
+        }
+        if line_numbers.is_some() && address_locations.is_some() && class_source_file_name.is_some() {
+            // Line numbers info is available, but no inlining info present
+            return self.write_line_numbers_without_stack_info(name, class_signature,
+                                                  class_source_file_name.as_ref().unwrap(),
+                                                  line_numbers.as_ref().unwrap(),
+                                                  address_locations.as_ref().unwrap(),
+                                                  address, timestamp);
+        }
+        // No line numbers info present
+        Ok(())
+    }
+
+    fn write_line_numbers_without_stack_info(&mut self, name: &rvmti::MethodName,
+                                             class_signature: &rvmti::ClassSignature,
+                                             class_source_file_name: &String,
+                                             line_numbers: &Vec<rvmti::LineNumberEntry>,
+                                             address_locations: &Vec<rvmti::AddressLocationEntry>,
+                                             address: usize, timestamp: i64) -> Result<(), WriteRecordError>
+    {
+        let mut record_size = 32u32;
+        let mut entries_count = 0u64;
+        for location in address_locations {
+            let maybe_line_number = self.find_line_number_entry(location.location as i32, line_numbers);
+            if maybe_line_number.is_some() {
+                entries_count += 1u64;
+                let name_bytes = class_source_file_name.as_bytes();
+                record_size += 17u32 + name_bytes.len() as u32;
+            }
+        }
+        let mut record = [0u8; 32];
+        let first_record_part = [
+            2u32, // id = JIT_CODE_DEBUG_INFO
+            record_size, // record size
+        ];
+        let second_record_part = [
+            timestamp as u64, // timestamp
+            address as u64, // code_addr
+            entries_count, // number of entries
+        ];
+        NativeEndian::write_u32_into(&first_record_part, &mut record[0..8]);
+        NativeEndian::write_u64_into(&second_record_part, &mut record[8..32]);
+        let _ = self.file.write(&record).map_err(WriteRecordError::IoError)?;
+        for location in address_locations {
+            let line = self.find_line_number_entry(location.location as i32, line_numbers);
+            if !line.is_some() {
+                continue;
+            }
+            let mut entry = [0u8; 16];
+            let first_entry_part = [
+                location.start_address as u64, // addr
+            ];
+
+            let second_entry_part = [
+                line.unwrap().line_number, //lineno
+                0i32, //discrim
+            ];
+            let name_bytes = class_source_file_name.as_bytes();
+            NativeEndian::write_u64_into(&first_entry_part, &mut entry[0..8]);
+            NativeEndian::write_i32_into(&second_entry_part, &mut entry[8..16]);
+            let _ = self.file.write(&entry).map_err(WriteRecordError::IoError)?;
+            let _ = self.file.write(&name_bytes).map_err(WriteRecordError::IoError)?;
+            let _ = self.file.write(&[0u8; 1]).map_err(WriteRecordError::IoError)?;
+        }
+        Ok(())
+    }
+
+    fn write_line_numbers_with_stack_info(&mut self, stack_info: &Vec<super::StackInfo>,
+                                          address: usize, timestamp: i64) -> Result<(), WriteRecordError>
+    {
+        let (record_size, entries_count) = self.pre_calc_record_size(stack_info);
+        if entries_count == 0u64 {
+            // No suitable entries, return right away
+            return Ok(());
+        }
+        let mut record = [0u8; 32];
+        let first_record_part = [
+            2u32, // id = JIT_CODE_DEBUG_INFO
+            record_size, // record size
+        ];
+        let second_record_part = [
+            timestamp as u64, // timestamp
+            address as u64, // code_addr
+            entries_count, // number of entries
+        ];
+        NativeEndian::write_u32_into(&first_record_part, &mut record[0..8]);
+        NativeEndian::write_u64_into(&second_record_part, &mut record[8..32]);
+        let _ = self.file.write(&record).map_err(WriteRecordError::IoError)?;
+        for info in stack_info {
+            if info.stack_frames.is_empty() {
+                continue;
+            }
+            let maybe_frame = self.find_frame(&info.stack_frames);
+            if maybe_frame.is_some() {
+                let frame = maybe_frame.unwrap();
+                let method = &frame.method;
+                let maybe_line_numbers = &method.line_numbers;
+                if !maybe_line_numbers.is_some() {
+                    continue;
+                }
+
+                let line_numbers = maybe_line_numbers.as_ref().unwrap();
+                let line = self.find_line_number_entry(frame.byte_code_index, line_numbers);
+                if !line.is_some() {
+                    continue;
+                }
+                let mut entry = [0u8; 16];
+                let first_entry_part = [
+                    info.pc_address as u64, // addr
+                ];
+
+                let second_entry_part = [
+                    line.unwrap().line_number, //lineno
+                    0i32, //discrim
+                ];
+                let name_bytes = match method.class.source_file_name {
+                    Some(ref n) => n.as_bytes(),
+                    None => "".as_bytes(),
+                };
+                NativeEndian::write_u64_into(&first_entry_part, &mut entry[0..8]);
+                NativeEndian::write_i32_into(&second_entry_part, &mut entry[8..16]);
+                let _ = self.file.write(&entry).map_err(WriteRecordError::IoError)?;
+                let _ = self.file.write(&name_bytes).map_err(WriteRecordError::IoError)?;
+                let _ = self.file.write(&[0u8; 1]).map_err(WriteRecordError::IoError)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn pre_calc_record_size(&self, stack_info: &Vec<super::StackInfo>) -> (u32, u64) {
+        let mut record_size = 32u32;
+        let mut entries_count = 0u64;
+        for info in stack_info {
+            if info.stack_frames.is_empty() {
+                // No line numbers info, skip
+                continue;
+            }
+            let frame = self.find_frame(&info.stack_frames);
+            if frame.is_some() {
+                entries_count += 1u64;
+                let method = &frame.unwrap().method;
+                let name_bytes = match method.class.source_file_name {
+                    Some(ref n) => n.as_bytes(),
+                    None => "".as_bytes(),
+                };
+                record_size += 17u32 + name_bytes.len() as u32;
+            }
+        }
+        (record_size, entries_count)
+    }
+
+    fn find_frame<'a>(&self, stack_frames: &'a Vec<super::StackFrameInfo>) -> Option<&'a super::StackFrameInfo> {
+        // Take first suitable frame
+        stack_frames.iter().find(|&f| {
+            let method = &f.method;
+            let line_numbers = &method.line_numbers;
+            let class = &method.class;
+            // not native, has line numbers info, has source file name
+            let has_source_info = !method.native_method && line_numbers.is_some()
+                && !line_numbers.as_ref().unwrap().is_empty() && class.source_file_name.is_some();
+            if !has_source_info {
+                return false;
+            } else {
+                // suitable line number is found
+                let line_num = line_numbers.as_ref().and_then(|nums| self.find_line_number_entry(f.byte_code_index, &nums));
+                return line_num.is_some();
+            }
+        })
+    }
+
+    fn find_line_number_entry<'a>(&self, byte_code_index: i32,
+                              line_numbers: &'a Vec<rvmti::LineNumberEntry>) -> Option<&'a rvmti::LineNumberEntry>
+    {
+        let mut result: Option<&rvmti::LineNumberEntry> = None;
+        for entry in line_numbers {
+            if entry.start_location as i64 <= byte_code_index as i64 {
+                result = Some(&entry)
+            } else {
+                break;
+            }
+        }
+        return result;
+    }
 }
 
 impl Drop for DumpFile {

@@ -328,6 +328,17 @@ fn run_worker(receiver: Receiver<AgentMessage>, mut dump_file: perf::DumpFile) {
                               name, class_signature, class_source_file_name, address, length,
                               line_numbers, address_locations, stack_info);
                         if address != 0 as usize && length > 0 as usize {
+                            match dump_file.write_line_numbers(&name, &class_signature,
+                                                               &class_source_file_name,
+                                                               address, &line_numbers,
+                                                               &address_locations, &stack_info,
+                                                               timestamp)
+                            {
+                                Ok(_) => {},
+                                Err(e) => {
+                                    error!("Failed to write jit code load line numbers record for compiled method: {}", e);
+                                }
+                            }
                             match dump_file.write_compiled_method_load(name, class_signature,
                                                                        class_source_file_name,
                                                                        address, length, line_numbers,
