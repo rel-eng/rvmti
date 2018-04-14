@@ -2057,7 +2057,7 @@ impl<'a> VmOwnedString<'a> {
 
 impl<'a> VmOwnedLineNumberTable<'a> {
 
-    fn as_line_number_slice(&self) -> Option<&'a [rvmti_sys::jvmtiLineNumberEntry]> {
+    fn as_line_number_slice(&'a self) -> Option<&'a [rvmti_sys::jvmtiLineNumberEntry]> {
         unsafe {
             if self.entry_count == 0 || self.ptr.is_null() {
                 return None
