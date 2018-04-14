@@ -1,11 +1,11 @@
 # rvmti - JVMTI agent in rust
-Dumps JITed code metadata for perf profiler. Only basic method info are supported for now.
+Dumps JITed code metadata for perf profiler. Only basic method info and line numbers are implemented for now. Method names demangling is still not implemented.
 
 Some C wrappers and bindgen are used for low level bindings.
 
 Usage:
 
-    perf record -k 1 java -agentpath:./librvmti.so -XX:+PreserveFramePointer ...
+    perf record -k 1 java -agentpath:./librvmti.so -XX:+PreserveFramePointer -XX:+UnlockDiagnosticVMOptions -XX:+DebugNonSafepoints ...
     perf inject -i perf.data -j -o perf.data.jitted
     perf report -i perf.data.jitted
 
