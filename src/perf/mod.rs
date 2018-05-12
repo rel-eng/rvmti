@@ -25,6 +25,7 @@ use self::rand::{thread_rng, Rng};
 use self::nix::sys::mman::{mmap, munmap, ProtFlags, MapFlags};
 
 use super::rvmti;
+use super::demangle;
 
 pub fn create_dump_dir() -> Result<PathBuf, CreteDumpDirError> {
     let cur_dir = env::current_dir().map_err(CreteDumpDirError::IoError)?;
@@ -175,7 +176,10 @@ impl DumpFile {
     {
         let pid = get_pid();
         let tid = get_tid();
-        let combined_name = format!("{}.{}{}", class_signature.signature, name.name, name.signature);
+        let combined_name = demangle::MethodType::new(&name.signature)
+            .and_then(|mt| demangle::ClassType::new(&class_signature.signature)
+                .map(|cs| mt.display_as_method_definition(&name.name, &cs)))
+            .unwrap_or_else(|_| format!("{}.{}{}", class_signature.signature, name.name, name.signature));
         let name_bytes = combined_name.as_bytes();
         let mut record = [0u8; 56];
         let first_record_part = [
@@ -235,18 +239,21 @@ impl DumpFile {
 
     fn write_line_numbers_without_stack_info(&mut self, name: &rvmti::MethodName,
                                              class_signature: &rvmti::ClassSignature,
-                                             class_source_file_name: &String,
+                                             class_source_file_name: &str,
                                              line_numbers: &Vec<rvmti::LineNumberEntry>,
                                              address_locations: &Vec<rvmti::AddressLocationEntry>,
                                              address: usize, timestamp: i64) -> Result<(), WriteRecordError>
     {
         let mut record_size = 32u32;
         let mut entries_count = 0u64;
+        let class_location = demangle::ClassType::new(&class_signature.signature)
+            .map(|v| v.package_as_file_path(class_source_file_name))
+            .unwrap_or_else(|_| class_source_file_name.to_owned());
         for location in address_locations {
             let maybe_line_number = self.find_line_number_entry(location.location as i32, line_numbers);
             if maybe_line_number.is_some() {
                 entries_count += 1u64;
-                let name_bytes = class_source_file_name.as_bytes();
+                let name_bytes = class_location.as_bytes();
                 record_size += 17u32 + name_bytes.len() as u32;
             }
         }
@@ -277,7 +284,7 @@ impl DumpFile {
                 line.unwrap().line_number, //lineno
                 0i32, //discrim
             ];
-            let name_bytes = class_source_file_name.as_bytes();
+            let name_bytes = class_location.as_bytes();
             NativeEndian::write_u64_into(&first_entry_part, &mut entry[0..8]);
             NativeEndian::write_i32_into(&second_entry_part, &mut entry[8..16]);
             let _ = self.file.write(&entry).map_err(WriteRecordError::IoError)?;
@@ -335,10 +342,11 @@ impl DumpFile {
                     line.unwrap().line_number, //lineno
                     0i32, //discrim
                 ];
-                let name_bytes = match method.class.source_file_name {
-                    Some(ref n) => n.as_bytes(),
-                    None => "".as_bytes(),
-                };
+                let class_location = method.class.source_file_name.as_ref()
+                    .map(|n| demangle::ClassType::new(&method.class.signature.signature)
+                    .map(|v| v.package_as_file_path(&n)).unwrap_or_else(|_| n.to_owned()))
+                    .unwrap_or_else(|| "".to_owned());
+                let name_bytes = class_location.as_bytes();
                 NativeEndian::write_u64_into(&first_entry_part, &mut entry[0..8]);
                 NativeEndian::write_i32_into(&second_entry_part, &mut entry[8..16]);
                 let _ = self.file.write(&entry).map_err(WriteRecordError::IoError)?;
@@ -361,10 +369,11 @@ impl DumpFile {
             if frame.is_some() {
                 entries_count += 1u64;
                 let method = &frame.unwrap().method;
-                let name_bytes = match method.class.source_file_name {
-                    Some(ref n) => n.as_bytes(),
-                    None => "".as_bytes(),
-                };
+                let class_location = method.class.source_file_name.as_ref()
+                    .map(|n| demangle::ClassType::new(&method.class.signature.signature)
+                    .map(|v| v.package_as_file_path(&n)).unwrap_or_else(|_| n.to_owned()))
+                    .unwrap_or_else(|| "".to_owned());
+                let name_bytes = class_location.as_bytes();
                 record_size += 17u32 + name_bytes.len() as u32;
             }
         }

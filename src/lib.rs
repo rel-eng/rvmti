@@ -7,6 +7,7 @@
 
 mod rvmti;
 mod perf;
+mod demangle;
 
 #[macro_use]
 extern crate lazy_static;

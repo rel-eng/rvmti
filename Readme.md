@@ -1,5 +1,5 @@
 # rvmti - JVMTI agent in rust
-Dumps JITed code metadata for perf profiler. Only basic method info and line numbers are implemented for now. Method names demangling is still not implemented.
+Dumps JITed code metadata for perf profiler. Only basic method info and line numbers are implemented for now. Method names demangling is implemented but generics are not supported yet.
 
 Some C wrappers and bindgen are used for low level bindings.
 

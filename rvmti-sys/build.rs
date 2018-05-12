@@ -7,7 +7,6 @@
 
 extern crate bindgen;
 extern crate cc;
-#[macro_use]
 extern crate log;
 extern crate env_logger;
 
