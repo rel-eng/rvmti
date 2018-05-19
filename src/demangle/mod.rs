@@ -108,39 +108,76 @@ impl FieldType {
 
     pub fn new(mangled_field_type: &str) -> Result<FieldType, DemangleError> {
         let mut dimensions = 0 as usize;
-        let mut remaining_slice = mangled_field_type.to_owned();
-        while !remaining_slice.is_empty() && remaining_slice.starts_with("[") {
-            remaining_slice = remaining_slice.chars().skip(1).collect::<String>();
-            dimensions += 1 as usize;
+        let mut state = FieldTypeParserState::Dimensions;
+        let mut char_iter = mangled_field_type.chars();
+        let mut class_name = String::from("");
+        loop {
+            let next_char = char_iter.next();
+            match next_char {
+                Some(c) => {
+                    match state {
+                        FieldTypeParserState::Dimensions => {
+                            match c {
+                                '[' => dimensions += 1 as usize,
+                                'B' => state = FieldTypeParserState::TypeTagByte,
+                                'C' => state = FieldTypeParserState::TypeTagChar,
+                                'D' => state = FieldTypeParserState::TypeTagDouble,
+                                'F' => state = FieldTypeParserState::TypeTagFloat,
+                                'I' => state = FieldTypeParserState::TypeTagInteger,
+                                'J' => state = FieldTypeParserState::TypeTagLong,
+                                'S' => state = FieldTypeParserState::TypeTagShort,
+                                'Z' => state = FieldTypeParserState::TypeTagBoolean,
+                                'L' => state = FieldTypeParserState::TypeTagClass,
+                                _ => return Err(DemangleError::DemangleFailed),
+                            }
+                        },
+                        FieldTypeParserState::TypeTagClass => {
+                            match c {
+                                ';' => state = FieldTypeParserState::ClassNameEnd,
+                                _ => class_name.push(c),
+                            }
+
+                        },
+                        _ => return Err(DemangleError::DemangleFailed),
+                    }
+                },
+                None => break,
+            };
         }
-        if remaining_slice.is_empty() {
-            return Err(DemangleError::DemangleFailed);
-        }
-        let remaining_length_chars = remaining_slice.chars().count();
-        if remaining_slice.starts_with("B") && remaining_length_chars == 1 {
-            return Ok(FieldType{scalar_type: ScalarFieldType::Byte, dimensions});
-        } else if remaining_slice.starts_with("C") && remaining_length_chars == 1 {
-            return Ok(FieldType{scalar_type: ScalarFieldType::Char, dimensions});
-        } else if remaining_slice.starts_with("D") && remaining_length_chars == 1 {
-            return Ok(FieldType{scalar_type: ScalarFieldType::Double, dimensions});
-        } else if remaining_slice.starts_with("F") && remaining_length_chars == 1 {
-            return Ok(FieldType{scalar_type: ScalarFieldType::Float, dimensions});
-        } else if remaining_slice.starts_with("I") && remaining_length_chars == 1 {
-            return Ok(FieldType{scalar_type: ScalarFieldType::Integer, dimensions});
-        } else if remaining_slice.starts_with("J") && remaining_length_chars == 1 {
-            return Ok(FieldType{scalar_type: ScalarFieldType::Long, dimensions});
-        } else if remaining_slice.starts_with("S") && remaining_length_chars == 1 {
-            return Ok(FieldType{scalar_type: ScalarFieldType::Short, dimensions});
-        } else if remaining_slice.starts_with("Z") && remaining_length_chars == 1 {
-            return Ok(FieldType{scalar_type: ScalarFieldType::Boolean, dimensions});
-        } else if remaining_slice.starts_with("L") && remaining_slice.ends_with(";") {
-            let name = BinaryName::new(&remaining_slice.chars().skip(1).take(remaining_length_chars - 2).collect::<String>())?;
-            return Ok(FieldType{scalar_type: ScalarFieldType::Class {name}, dimensions});
-        } else {
-            return Err(DemangleError::DemangleFailed);
+        match state {
+            FieldTypeParserState::TypeTagByte => return Ok(FieldType{scalar_type: ScalarFieldType::Byte, dimensions}),
+            FieldTypeParserState::TypeTagChar => return Ok(FieldType{scalar_type: ScalarFieldType::Char, dimensions}),
+            FieldTypeParserState::TypeTagDouble => return Ok(FieldType{scalar_type: ScalarFieldType::Double, dimensions}),
+            FieldTypeParserState::TypeTagFloat => return Ok(FieldType{scalar_type: ScalarFieldType::Float, dimensions}),
+            FieldTypeParserState::TypeTagInteger => return Ok(FieldType{scalar_type: ScalarFieldType::Integer, dimensions}),
+            FieldTypeParserState::TypeTagLong => return Ok(FieldType{scalar_type: ScalarFieldType::Long, dimensions}),
+            FieldTypeParserState::TypeTagShort => return Ok(FieldType{scalar_type: ScalarFieldType::Short, dimensions}),
+            FieldTypeParserState::TypeTagBoolean => return Ok(FieldType{scalar_type: ScalarFieldType::Boolean, dimensions}),
+            FieldTypeParserState::ClassNameEnd => {
+                if class_name.is_empty() {
+                    return Err(DemangleError::DemangleFailed);
+                }
+                let name = BinaryName::new(&class_name)?;
+                return Ok(FieldType{scalar_type: ScalarFieldType::Class {name}, dimensions});
+            },
+            _ => return Err(DemangleError::DemangleFailed),
         }
     }
 
+}
+
+enum FieldTypeParserState {
+    Dimensions,
+    TypeTagByte,
+    TypeTagChar,
+    TypeTagDouble,
+    TypeTagFloat,
+    TypeTagInteger,
+    TypeTagLong,
+    TypeTagShort,
+    TypeTagBoolean,
+    TypeTagClass,
+    ClassNameEnd,
 }
 
 impl fmt::Display for FieldType {
@@ -189,59 +226,136 @@ impl MethodType {
     pub fn new(mangled_method_type: &str) -> Result<MethodType, DemangleError> {
         let mut parameter_types: Vec<FieldType> = Vec::new();
         let mut return_type: Option<FieldType> = None;
-        let mut remaining_slice = mangled_method_type.to_owned();
-        if remaining_slice.is_empty() || !remaining_slice.starts_with("(") {
-            return Err(DemangleError::DemangleFailed);
-        }
-        remaining_slice = remaining_slice.chars().skip(1).collect::<String>();
-        if remaining_slice.is_empty() {
-            return Err(DemangleError::DemangleFailed);
-        }
+        let mut dimensions = 0 as usize;
+        let mut state = MethodTypeParserState::ParametersStart;
+        let mut char_iter = mangled_method_type.chars();
+        let mut class_name = String::from("");
         loop {
-            match MethodType::take_field_type(&remaining_slice) {
-                Ok((t, r)) => {
-                    match t {
-                        Some(field_type) => {
-                            parameter_types.push(field_type);
-                            remaining_slice = r;
+            let next_char = char_iter.next();
+            match next_char {
+                Some(c) => {
+                    match state {
+                        MethodTypeParserState::ParametersStart => {
+                            match c {
+                                '(' => state = MethodTypeParserState::ParameterDimensions,
+                                _ => return Err(DemangleError::DemangleFailed),
+                            }
                         },
-                        None => {
-                            remaining_slice = r;
-                            break;
+                        MethodTypeParserState::ParameterDimensions => {
+                            match c {
+                                '[' => dimensions += 1 as usize,
+                                'B' => {
+                                    parameter_types.push(FieldType{scalar_type: ScalarFieldType::Byte, dimensions});
+                                    dimensions = 0;
+                                },
+                                'C' => {
+                                    parameter_types.push(FieldType{scalar_type: ScalarFieldType::Char, dimensions});
+                                    dimensions = 0;
+                                },
+                                'D' => {
+                                    parameter_types.push(FieldType{scalar_type: ScalarFieldType::Double, dimensions});
+                                    dimensions = 0;
+                                },
+                                'F' => {
+                                    parameter_types.push(FieldType{scalar_type: ScalarFieldType::Float, dimensions});
+                                    dimensions = 0;
+                                },
+                                'I' => {
+                                    parameter_types.push(FieldType{scalar_type: ScalarFieldType::Integer, dimensions});
+                                    dimensions = 0;
+                                },
+                                'J' => {
+                                    parameter_types.push(FieldType{scalar_type: ScalarFieldType::Long, dimensions});
+                                    dimensions = 0;
+                                },
+                                'S' => {
+                                    parameter_types.push(FieldType{scalar_type: ScalarFieldType::Short, dimensions});
+                                    dimensions = 0;
+                                },
+                                'Z' => {
+                                    parameter_types.push(FieldType{scalar_type: ScalarFieldType::Boolean, dimensions});
+                                    dimensions = 0;
+                                },
+                                'L' => state = MethodTypeParserState::ParameterTypeTagClass,
+                                ')' => {
+                                    if dimensions == 0 {
+                                        state = MethodTypeParserState::ReturnTypeDimensions
+                                    } else {
+                                        return Err(DemangleError::DemangleFailed)
+                                    }
+                                },
+                                _ => return Err(DemangleError::DemangleFailed),
+                            }
                         },
+                        MethodTypeParserState::ParameterTypeTagClass => {
+                            match c {
+                                ';' => {
+                                    if class_name.is_empty() {
+                                        return Err(DemangleError::DemangleFailed);
+                                    }
+                                    let name = BinaryName::new(&class_name)?;
+                                    parameter_types.push(FieldType{scalar_type: ScalarFieldType::Class {name}, dimensions});
+                                    dimensions = 0;
+                                    class_name = String::from("");
+                                    state = MethodTypeParserState::ParameterDimensions;
+                                },
+                                _ => class_name.push(c),
+                            }
+
+                        },
+                        MethodTypeParserState::ReturnTypeDimensions => {
+                            match c {
+                                '[' => dimensions += 1 as usize,
+                                'B' => state = MethodTypeParserState::ReturnTypeTagByte,
+                                'C' => state = MethodTypeParserState::ReturnTypeTagChar,
+                                'D' => state = MethodTypeParserState::ReturnTypeTagDouble,
+                                'F' => state = MethodTypeParserState::ReturnTypeTagFloat,
+                                'I' => state = MethodTypeParserState::ReturnTypeTagInteger,
+                                'J' => state = MethodTypeParserState::ReturnTypeTagLong,
+                                'S' => state = MethodTypeParserState::ReturnTypeTagShort,
+                                'Z' => state = MethodTypeParserState::ReturnTypeTagBoolean,
+                                'L' => state = MethodTypeParserState::ReturnTypeTagClass,
+                                'V' => {
+                                    if dimensions == 0 {
+                                        state = MethodTypeParserState::ReturnTypeTagVoid
+                                    } else {
+                                        return Err(DemangleError::DemangleFailed)
+                                    }
+                                },
+                                _ => return Err(DemangleError::DemangleFailed),
+                            }
+                        },
+                        MethodTypeParserState::ReturnTypeTagClass => {
+                            match c {
+                                ';' => state = MethodTypeParserState::ReturnClassNameEnd,
+                                _ => class_name.push(c),
+                            }
+
+                        },
+                        _ => return Err(DemangleError::DemangleFailed),
                     }
                 },
-                Err(e) => return Err(e),
-            }
+                None => break,
+            };
         }
-        if remaining_slice.is_empty() || !remaining_slice.starts_with(")") {
-            return Err(DemangleError::DemangleFailed);
-        }
-        remaining_slice = remaining_slice.chars().skip(1).collect::<String>();
-        if remaining_slice.is_empty() {
-            return Err(DemangleError::DemangleFailed);
-        }
-        let remaining_length_chars = remaining_slice.chars().count();
-        if remaining_slice.starts_with("V") && remaining_length_chars == 1 {
-            return Ok(MethodType{parameter_types, return_type});
-        }
-        match MethodType::take_field_type(&remaining_slice) {
-            Ok((t, r)) => {
-                match t {
-                    Some(field_type) => {
-                        return_type = Some(field_type);
-                        remaining_slice = r;
-                    },
-                    None => {
-                        remaining_slice = r;
-                        return Err(DemangleError::DemangleFailed);
-                    },
+        match state {
+            MethodTypeParserState::ReturnTypeTagByte => return_type = Some(FieldType{scalar_type: ScalarFieldType::Byte, dimensions}),
+            MethodTypeParserState::ReturnTypeTagChar => return_type = Some(FieldType{scalar_type: ScalarFieldType::Char, dimensions}),
+            MethodTypeParserState::ReturnTypeTagDouble => return_type = Some(FieldType{scalar_type: ScalarFieldType::Double, dimensions}),
+            MethodTypeParserState::ReturnTypeTagFloat => return_type = Some(FieldType{scalar_type: ScalarFieldType::Float, dimensions}),
+            MethodTypeParserState::ReturnTypeTagInteger => return_type = Some(FieldType{scalar_type: ScalarFieldType::Integer, dimensions}),
+            MethodTypeParserState::ReturnTypeTagLong => return_type = Some(FieldType{scalar_type: ScalarFieldType::Long, dimensions}),
+            MethodTypeParserState::ReturnTypeTagShort => return_type = Some(FieldType{scalar_type: ScalarFieldType::Short, dimensions}),
+            MethodTypeParserState::ReturnTypeTagBoolean => return_type = Some(FieldType{scalar_type: ScalarFieldType::Boolean, dimensions}),
+            MethodTypeParserState::ReturnTypeTagVoid => return_type = None,
+            MethodTypeParserState::ReturnClassNameEnd => {
+                if class_name.is_empty() {
+                    return Err(DemangleError::DemangleFailed);
                 }
+                let name = BinaryName::new(&class_name)?;
+                return_type = Some(FieldType{scalar_type: ScalarFieldType::Class {name}, dimensions});
             },
-            Err(e) => return Err(e),
-        };
-        if !remaining_slice.is_empty() {
-            return Err(DemangleError::DemangleFailed);
+            _ => return Err(DemangleError::DemangleFailed),
         }
         return Ok(MethodType{parameter_types, return_type});
     }
@@ -256,47 +370,24 @@ impl MethodType {
         format!("{} {}.{}({})", return_type, class_name, method_name, parameter_types.join(", ")).to_string()
     }
 
-    fn take_field_type<'a>(input: &'a str) -> Result<(Option<FieldType>, String), DemangleError> {
-        let mut dimensions = 0 as usize;
-        let mut remaining_slice = input.to_owned();
-        while remaining_slice.starts_with("[") {
-            remaining_slice = remaining_slice.chars().skip(1).collect::<String>();
-            dimensions += 1 as usize;
-        }
-        if remaining_slice.is_empty() {
-            return Err(DemangleError::DemangleFailed);
-        }
-        if remaining_slice.starts_with("B") {
-            return Ok((Some(FieldType{scalar_type: ScalarFieldType::Byte, dimensions}), remaining_slice.chars().skip(1).collect::<String>()));
-        } else if remaining_slice.starts_with("C") {
-            return Ok((Some(FieldType{scalar_type: ScalarFieldType::Char, dimensions}), remaining_slice.chars().skip(1).collect::<String>()));
-        } else if remaining_slice.starts_with("D") {
-            return Ok((Some(FieldType{scalar_type: ScalarFieldType::Double, dimensions}), remaining_slice.chars().skip(1).collect::<String>()));
-        } else if remaining_slice.starts_with("F") {
-            return Ok((Some(FieldType{scalar_type: ScalarFieldType::Float, dimensions}), remaining_slice.chars().skip(1).collect::<String>()));
-        } else if remaining_slice.starts_with("I") {
-            return Ok((Some(FieldType{scalar_type: ScalarFieldType::Integer, dimensions}), remaining_slice.chars().skip(1).collect::<String>()));
-        } else if remaining_slice.starts_with("J") {
-            return Ok((Some(FieldType{scalar_type: ScalarFieldType::Long, dimensions}), remaining_slice.chars().skip(1).collect::<String>()));
-        } else if remaining_slice.starts_with("S") {
-            return Ok((Some(FieldType{scalar_type: ScalarFieldType::Short, dimensions}), remaining_slice.chars().skip(1).collect::<String>()));
-        } else if remaining_slice.starts_with("Z") {
-            return Ok((Some(FieldType{scalar_type: ScalarFieldType::Boolean, dimensions}), remaining_slice.chars().skip(1).collect::<String>()));
-        } else if remaining_slice.starts_with("L") {
-            let tail = remaining_slice.chars().skip(1).collect::<String>();
-            let splitted_tail: Vec<&str> = tail.splitn(2, ";").collect();
-            if splitted_tail.len() == 2 {
-                let name = BinaryName::new(splitted_tail[0])?;
-                return Ok((Some(FieldType { scalar_type: ScalarFieldType::Class { name }, dimensions }), splitted_tail[1].to_owned()));
-            } else {
-                return Err(DemangleError::DemangleFailed);
-            }
-        } else if remaining_slice.starts_with(")") {
-            return Ok((None, remaining_slice));
-        } else {
-            return Err(DemangleError::DemangleFailed);
-        }
-    }
+}
+
+enum MethodTypeParserState {
+    ParametersStart,
+    ParameterDimensions,
+    ParameterTypeTagClass,
+    ReturnTypeDimensions,
+    ReturnTypeTagByte,
+    ReturnTypeTagChar,
+    ReturnTypeTagDouble,
+    ReturnTypeTagFloat,
+    ReturnTypeTagInteger,
+    ReturnTypeTagLong,
+    ReturnTypeTagShort,
+    ReturnTypeTagBoolean,
+    ReturnTypeTagVoid,
+    ReturnTypeTagClass,
+    ReturnClassNameEnd,
 }
 
 impl fmt::Display for MethodType {
@@ -395,9 +486,6 @@ mod tests {
         assert_eq!(super::FieldType::new("Ljava/lang/Thread;").unwrap(),
                    super::FieldType{ scalar_type: super::ScalarFieldType::Class {name: super::BinaryName{packages:
                    vec!["java".to_owned(), "lang".to_owned()], class: "Thread".to_owned()}}, dimensions: 0});
-        assert_eq!(super::FieldType::new("L;").unwrap(),
-                   super::FieldType{ scalar_type: super::ScalarFieldType::Class {name: super::BinaryName{packages:
-                   vec![], class: "".to_owned()}}, dimensions: 0});
         assert_eq!(super::FieldType::new("[Ljava/lang/Thread;").unwrap(),
                    super::FieldType{ scalar_type: super::ScalarFieldType::Class {name: super::BinaryName{packages:
                    vec!["java".to_owned(), "lang".to_owned()], class: "Thread".to_owned()}}, dimensions: 1});
@@ -432,8 +520,13 @@ mod tests {
         assert!(super::FieldType::new("[[").is_err());
         assert!(super::FieldType::new("M").is_err());
         assert!(super::FieldType::new("[M").is_err());
+        assert!(super::FieldType::new("[BB").is_err());
+        assert!(super::FieldType::new("BB").is_err());
+        assert!(super::FieldType::new("[B[B").is_err());
+        assert!(super::FieldType::new("[B[").is_err());
         assert!(super::FieldType::new("[[M").is_err());
         assert!(super::FieldType::new("Lx").is_err());
+        assert!(super::FieldType::new("L;").is_err());
         assert!(super::FieldType::new("L/;").is_err());
     }
 
