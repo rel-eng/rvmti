@@ -97,8 +97,7 @@ fn main() {
         .clang_arg(format!("-I{}", &java_include_path_str))
         .clang_arg(format!("-I{}", &java_md_include_path_str))
         .header("src/wrapper.h")
-        .with_codegen_config(bindgen::CodegenConfig{functions: true, types: true, vars: true,
-            methods: true, constructors: true, destructors: true})
+        .with_codegen_config(bindgen::CodegenConfig::all())
         .whitelist_recursively(true)
         .whitelist_type("JavaVM")
         .opaque_type("JavaVM")

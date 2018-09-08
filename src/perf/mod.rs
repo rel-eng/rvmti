@@ -9,8 +9,8 @@ extern crate nix;
 extern crate libc;
 extern crate byteorder;
 extern crate rand;
-extern crate time;
 extern crate log;
+extern crate chrono;
 
 use std::io::{self, Read, Write, ErrorKind};
 use std::env;
@@ -23,6 +23,7 @@ use std::ptr;
 use self::byteorder::{ReadBytesExt, NativeEndian, ByteOrder};
 use self::rand::{thread_rng, Rng};
 use self::nix::sys::mman::{mmap, munmap, ProtFlags, MapFlags};
+use self::chrono::prelude::Local;
 
 use super::rvmti;
 use super::demangle;
@@ -31,7 +32,7 @@ pub fn create_dump_dir() -> Result<PathBuf, CreteDumpDirError> {
     let cur_dir = env::current_dir().map_err(CreteDumpDirError::IoError)?;
     let jit_dir = cur_dir.join(".debug").join("jit");
     let _ = DirBuilder::new().recursive(true).mode(0o755).create(&jit_dir).map_err(CreteDumpDirError::IoError)?;
-    let date = time::strftime("%Y%m%d", &time::now()).map_err(CreteDumpDirError::DateFormatError)?;
+    let date = Local::now().format("%Y%m%d").to_string();
     let prefix = format!("java-jit-{}", date);
     let mut rng = thread_rng();
     for _ in 0u32..(1u32 << 31) {
@@ -492,8 +493,6 @@ pub enum GetEMachineError {
 pub enum CreteDumpDirError {
     #[fail(display = "I/O error: {}", _0)]
     IoError(#[cause] io::Error),
-    #[fail(display = "Date format error: {}", _0)]
-    DateFormatError(#[cause] time::ParseError),
     #[fail(display = "Too many failed attempts to create random temp dir")]
     DirNameConflict,
 }
