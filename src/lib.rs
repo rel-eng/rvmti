@@ -9,21 +9,16 @@ mod rvmti;
 mod perf;
 mod demangle;
 
-#[macro_use]
-extern crate lazy_static;
-#[macro_use]
-extern crate log;
-extern crate failure;
-#[macro_use]
-extern crate failure_derive;
-extern crate nix;
-
 use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::sync::MutexGuard;
 use std::thread::{self, JoinHandle};
 use std::sync::mpsc::{channel, Sender, Receiver};
 use std::slice;
+
+use log::{debug, warn, error, info};
+use lazy_static::lazy_static;
+use failure_derive::Fail;
 
 pub use crate::rvmti::Agent_OnLoad;
 pub use crate::rvmti::Agent_OnUnload;

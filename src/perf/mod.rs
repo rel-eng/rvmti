@@ -5,13 +5,6 @@
 //   3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-extern crate nix;
-extern crate libc;
-extern crate byteorder;
-extern crate rand;
-extern crate log;
-extern crate chrono;
-
 use std::io::{self, Read, Write, ErrorKind};
 use std::env;
 use std::fs::{File, DirBuilder, OpenOptions};
@@ -20,11 +13,13 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::os::unix::io::AsRawFd;
 use std::ptr;
 
-use self::byteorder::{ReadBytesExt, NativeEndian, ByteOrder};
-use self::rand::{thread_rng, Rng};
-use self::rand::distributions::Alphanumeric;
-use self::nix::sys::mman::{mmap, munmap, ProtFlags, MapFlags};
-use self::chrono::prelude::Local;
+use log::{debug, error};
+use failure_derive::Fail;
+use byteorder::{ReadBytesExt, NativeEndian, ByteOrder};
+use rand::{thread_rng, Rng};
+use rand::distributions::Alphanumeric;
+use nix::sys::mman::{mmap, munmap, ProtFlags, MapFlags};
+use chrono::prelude::Local;
 
 use super::rvmti;
 use super::demangle;

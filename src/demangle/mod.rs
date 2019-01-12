@@ -7,6 +7,8 @@
 
 use std::fmt;
 
+use failure_derive::Fail;
+
 #[derive(Debug, PartialEq)]
 pub struct BinaryName {
     packages: Vec<String>,
