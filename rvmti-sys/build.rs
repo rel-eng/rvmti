@@ -22,7 +22,7 @@ struct MacroCallback {
 impl ParseCallbacks for MacroCallback {
     fn int_macro(&self, _name: &str, _value: i64) -> Option<IntKind> {
         if _name.starts_with("JNI_OK") {
-            return Some(IntKind::Custom{name: "::std::os::raw::c_int", is_signed: true})
+            return Some(IntKind::I32)
         }
         return None;
     }
