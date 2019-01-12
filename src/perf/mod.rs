@@ -84,7 +84,7 @@ impl DumpFile {
                 let mut prot_flags = ProtFlags::empty();
                 prot_flags.insert(ProtFlags::PROT_READ);
                 prot_flags.insert(ProtFlags::PROT_EXEC);
-                let mut mapped_file = unsafe {
+                let mapped_file = unsafe {
                     mmap(ptr::null_mut() as *mut libc::c_void, map_size, prot_flags,
                          MapFlags::MAP_PRIVATE, file.as_raw_fd(), 0)
                         .map_err(NewDumpFileError::MmapError)?
