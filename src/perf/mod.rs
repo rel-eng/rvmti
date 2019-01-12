@@ -22,6 +22,7 @@ use std::ptr;
 
 use self::byteorder::{ReadBytesExt, NativeEndian, ByteOrder};
 use self::rand::{thread_rng, Rng};
+use self::rand::distributions::Alphanumeric;
 use self::nix::sys::mman::{mmap, munmap, ProtFlags, MapFlags};
 use self::chrono::prelude::Local;
 
@@ -36,7 +37,7 @@ pub fn create_dump_dir() -> Result<PathBuf, CreteDumpDirError> {
     let prefix = format!("java-jit-{}", date);
     let mut rng = thread_rng();
     for _ in 0u32..(1u32 << 31) {
-        let suffix: String = rng.gen_ascii_chars().take(8).collect();
+        let suffix: String = rng.sample_iter(&Alphanumeric).take(8).collect();
         let dir = format!("{}.{}", prefix, suffix);
         let path = jit_dir.join(&dir);
         match DirBuilder::new().mode(0o700).create(&path) {

@@ -225,7 +225,7 @@ impl MethodType {
 
     pub fn new(mangled_method_type: &str) -> Result<MethodType, DemangleError> {
         let mut parameter_types: Vec<FieldType> = Vec::new();
-        let mut return_type: Option<FieldType> = None;
+        let return_type: Option<FieldType>;
         let mut dimensions = 0 as usize;
         let mut state = MethodTypeParserState::ParametersStart;
         let mut char_iter = mangled_method_type.chars();
