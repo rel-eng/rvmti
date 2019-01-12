@@ -481,6 +481,7 @@ pub enum JvmtiEvent {
     GarbageCollectionFinish,
     ObjectFree,
     VmObjectAlloc,
+    SampledObjectAlloc,
 }
 
 #[derive(Fail, Debug)]
@@ -507,6 +508,7 @@ pub enum JvmtiVersion {
     Version1dot1,
     Version1dot2,
     Version9,
+    Version11,
     CurrentVersion,
 }
 
@@ -1797,6 +1799,7 @@ impl From<JvmtiVersion> for rvmti_sys::jint {
             JvmtiVersion::Version1dot1 => rvmti_sys::JVMTI_VERSION_1_1 as rvmti_sys::jint,
             JvmtiVersion::Version1dot2 => rvmti_sys::JVMTI_VERSION_1_2 as rvmti_sys::jint,
             JvmtiVersion::Version9 => rvmti_sys::JVMTI_VERSION_9 as rvmti_sys::jint,
+            JvmtiVersion::Version11 => rvmti_sys::JVMTI_VERSION_11 as rvmti_sys::jint,
             JvmtiVersion::CurrentVersion => rvmti_sys::JVMTI_VERSION as rvmti_sys::jint,
         }
     }
@@ -2237,6 +2240,7 @@ impl From<JvmtiEvent> for rvmti_sys::jvmtiEvent {
             JvmtiEvent::GarbageCollectionFinish => rvmti_sys::jvmtiEvent_JVMTI_EVENT_GARBAGE_COLLECTION_FINISH,
             JvmtiEvent::ObjectFree => rvmti_sys::jvmtiEvent_JVMTI_EVENT_OBJECT_FREE,
             JvmtiEvent::VmObjectAlloc => rvmti_sys::jvmtiEvent_JVMTI_EVENT_VM_OBJECT_ALLOC,
+            JvmtiEvent::SampledObjectAlloc => rvmti_sys::jvmtiEvent_JVMTI_EVENT_SAMPLED_OBJECT_ALLOC,
         }
     }
 

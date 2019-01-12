@@ -128,6 +128,7 @@ fn main() {
         .whitelist_var("JVMTI_VERSION_1_1")
         .whitelist_var("JVMTI_VERSION_1_2")
         .whitelist_var("JVMTI_VERSION_9")
+        .whitelist_var("JVMTI_VERSION_11")
         .whitelist_var("JVMTI_VERSION")
         .whitelist_var("JNI_OK")
         .whitelist_var("JNI_ERR")
