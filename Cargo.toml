@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["rel-eng <rel-eng@yandex.ru>"]
 license = "BSD-3-Clause"
 license-file = "LICENSE"
+edition = "2018"
 
 [dependencies]
 lazy_static = "1.1.0"
@@ -26,11 +27,14 @@ version = "0.1.0"
 name = "rvmti"
 crate-type = ["cdylib"]
 
+[profile.dev]
+panic = 'unwind'
+
 [profile.release]
 opt-level = 3
 debug = false
 rpath = false
-lto = true
+lto = "fat"
 debug-assertions = false
 codegen-units = 1
 panic = 'unwind'
