@@ -25,39 +25,39 @@ use std::thread::{self, JoinHandle};
 use std::sync::mpsc::{channel, Sender, Receiver};
 use std::slice;
 
-pub use rvmti::Agent_OnLoad;
-pub use rvmti::Agent_OnUnload;
-pub use rvmti::jvmti_event_breakpoint_handler;
-pub use rvmti::jvmti_event_class_file_load_hook_handler;
-pub use rvmti::jvmti_event_class_load_handler;
-pub use rvmti::jvmti_event_class_prepare_handler;
-pub use rvmti::jvmti_event_compiled_method_load_handler;
-pub use rvmti::jvmti_event_compiled_method_unload_handler;
-pub use rvmti::jvmti_event_data_dump_request_handler;
-pub use rvmti::jvmti_event_dynamic_code_generated_handler;
-pub use rvmti::jvmti_event_exception_handler;
-pub use rvmti::jvmti_event_exception_catch_handler;
-pub use rvmti::jvmti_event_field_access_handler;
-pub use rvmti::jvmti_event_field_modification_handler;
-pub use rvmti::jvmti_event_frame_pop_handler;
-pub use rvmti::jvmti_event_garbage_collection_finish_handler;
-pub use rvmti::jvmti_event_garbage_collection_start_handler;
-pub use rvmti::jvmti_event_method_entry_handler;
-pub use rvmti::jvmti_event_method_exit_handler;
-pub use rvmti::jvmti_event_monitor_contended_enter_handler;
-pub use rvmti::jvmti_event_monitor_contended_entered_handler;
-pub use rvmti::jvmti_event_monitor_wait_handler;
-pub use rvmti::jvmti_event_monitor_waited_handler;
-pub use rvmti::jvmti_event_native_method_bind_handler;
-pub use rvmti::jvmti_event_object_free_handler;
-pub use rvmti::jvmti_event_resource_exhausted_handler;
-pub use rvmti::jvmti_event_single_step_handler;
-pub use rvmti::jvmti_event_thread_end_handler;
-pub use rvmti::jvmti_event_thread_start_handler;
-pub use rvmti::jvmti_event_vm_death_handler;
-pub use rvmti::jvmti_event_vm_init_handler;
-pub use rvmti::jvmti_event_vm_object_alloc_handler;
-pub use rvmti::jvmti_event_vm_start_handler;
+pub use crate::rvmti::Agent_OnLoad;
+pub use crate::rvmti::Agent_OnUnload;
+pub use crate::rvmti::jvmti_event_breakpoint_handler;
+pub use crate::rvmti::jvmti_event_class_file_load_hook_handler;
+pub use crate::rvmti::jvmti_event_class_load_handler;
+pub use crate::rvmti::jvmti_event_class_prepare_handler;
+pub use crate::rvmti::jvmti_event_compiled_method_load_handler;
+pub use crate::rvmti::jvmti_event_compiled_method_unload_handler;
+pub use crate::rvmti::jvmti_event_data_dump_request_handler;
+pub use crate::rvmti::jvmti_event_dynamic_code_generated_handler;
+pub use crate::rvmti::jvmti_event_exception_handler;
+pub use crate::rvmti::jvmti_event_exception_catch_handler;
+pub use crate::rvmti::jvmti_event_field_access_handler;
+pub use crate::rvmti::jvmti_event_field_modification_handler;
+pub use crate::rvmti::jvmti_event_frame_pop_handler;
+pub use crate::rvmti::jvmti_event_garbage_collection_finish_handler;
+pub use crate::rvmti::jvmti_event_garbage_collection_start_handler;
+pub use crate::rvmti::jvmti_event_method_entry_handler;
+pub use crate::rvmti::jvmti_event_method_exit_handler;
+pub use crate::rvmti::jvmti_event_monitor_contended_enter_handler;
+pub use crate::rvmti::jvmti_event_monitor_contended_entered_handler;
+pub use crate::rvmti::jvmti_event_monitor_wait_handler;
+pub use crate::rvmti::jvmti_event_monitor_waited_handler;
+pub use crate::rvmti::jvmti_event_native_method_bind_handler;
+pub use crate::rvmti::jvmti_event_object_free_handler;
+pub use crate::rvmti::jvmti_event_resource_exhausted_handler;
+pub use crate::rvmti::jvmti_event_single_step_handler;
+pub use crate::rvmti::jvmti_event_thread_end_handler;
+pub use crate::rvmti::jvmti_event_thread_start_handler;
+pub use crate::rvmti::jvmti_event_vm_death_handler;
+pub use crate::rvmti::jvmti_event_vm_init_handler;
+pub use crate::rvmti::jvmti_event_vm_object_alloc_handler;
+pub use crate::rvmti::jvmti_event_vm_start_handler;
 
 lazy_static! {
     static ref AGENT_ENV: Mutex<Option<AgentEnv>> = Mutex::new(None);
@@ -78,7 +78,7 @@ pub fn agent_on_load(vm: &rvmti::Jvm, options: &Option<String>) -> i32 {
     }
 }
 
-pub fn agent_on_unload(vm: &rvmti::Jvm) {
+pub fn agent_on_unload(_vm: &rvmti::Jvm) {
     info!("Agent unloading...");
     match AGENT_ENV.lock() {
         Ok(mut guard) => {
@@ -125,7 +125,7 @@ fn on_compiled_method_load(env: &mut rvmti::JvmtiEnv, method_id: &rvmti::JMethod
                            compile_info: &Option<Vec<rvmti::CompiledMethodLoadRecord>>,
                            address: usize, length: usize) -> Result<(), CompiledMethodLoadHandlerError>
 {
-    let mut guard = AGENT_ENV.lock().map_err(|e| CompiledMethodLoadHandlerError::FailedToLockAgentEnvironment)?;
+    let mut guard = AGENT_ENV.lock().map_err(|_e| CompiledMethodLoadHandlerError::FailedToLockAgentEnvironment)?;
     match *guard {
         Some(ref mut agent_env) => {
             let method_info = method_info(env, method_id).map_err(CompiledMethodLoadHandlerError::UnableToGetMethodInfo)?;
@@ -141,10 +141,10 @@ fn on_compiled_method_load(env: &mut rvmti::JvmtiEnv, method_id: &rvmti::JMethod
     }
 }
 
-fn on_dynamic_code_generated(env: &mut rvmti::JvmtiEnv, name: &Option<String>, address: usize,
+fn on_dynamic_code_generated(_env: &mut rvmti::JvmtiEnv, name: &Option<String>, address: usize,
                              length: usize) -> Result<(), DynamicCodeGeneratedHandlerError>
 {
-    let mut guard = AGENT_ENV.lock().map_err(|e| DynamicCodeGeneratedHandlerError::FailedToLockAgentEnvironment)?;
+    let mut guard = AGENT_ENV.lock().map_err(|_e| DynamicCodeGeneratedHandlerError::FailedToLockAgentEnvironment)?;
     match *guard {
         Some(ref mut env) => {
             let timestamp = perf::get_timestamp().map_err(DynamicCodeGeneratedHandlerError::UnableToGetTimestamp)?;
@@ -155,7 +155,7 @@ fn on_dynamic_code_generated(env: &mut rvmti::JvmtiEnv, name: &Option<String>, a
     }
 }
 
-fn unload_environment(env: &mut rvmti::JvmtiEnv) {
+fn unload_environment(_env: &mut rvmti::JvmtiEnv) {
 }
 
 fn do_on_load<'a>(vm: &rvmti::Jvm, options: &Option<String>) -> Result<(), AgentInitError> {
@@ -183,7 +183,7 @@ fn do_on_load<'a>(vm: &rvmti::Jvm, options: &Option<String>) -> Result<(), Agent
     }
 }
 
-fn initialize_agent<'a>(env: &mut rvmti::JvmtiEnv, options: &Option<String>) -> Result<(), AgentInitError> {
+fn initialize_agent<'a>(env: &mut rvmti::JvmtiEnv, _options: &Option<String>) -> Result<(), AgentInitError> {
     let _ = add_capabilities(env)?;
     let _ = set_event_callbacks(env)?;
     let _ = enable_events(env)?;

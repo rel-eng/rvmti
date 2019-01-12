@@ -18,10 +18,10 @@ use std::ptr;
 use std::panic;
 use std::slice;
 
-use agent_on_load;
-use agent_on_unload;
-use jvmti_event_dynamic_code_generated;
-use jvmti_event_compiled_method_load;
+use crate::agent_on_load;
+use crate::agent_on_unload;
+use crate::jvmti_event_dynamic_code_generated;
+use crate::jvmti_event_compiled_method_load;
 
 #[allow(non_snake_case)]
 #[allow(unused_variables)]
@@ -74,41 +74,41 @@ pub extern "C" fn Agent_OnUnload(vm: *mut rvmti_sys::JavaVM) {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_breakpoint_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                 jni_env: *mut rvmti_sys::JNIEnv,
-                                                 thread: rvmti_sys::jthread,
-                                                 method: rvmti_sys::jmethodID,
-                                                 location: rvmti_sys::jlocation)
+pub extern "C" fn jvmti_event_breakpoint_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                 _jni_env: *mut rvmti_sys::JNIEnv,
+                                                 _thread: rvmti_sys::jthread,
+                                                 _method: rvmti_sys::jmethodID,
+                                                 _location: rvmti_sys::jlocation)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_class_file_load_hook_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                           jni_env: *mut rvmti_sys::JNIEnv,
-                                                           class_being_redefined: rvmti_sys::jclass,
-                                                           loader: rvmti_sys::jobject,
-                                                           name: *const ::std::os::raw::c_char,
-                                                           protection_domain: rvmti_sys::jobject,
-                                                           class_data_len: rvmti_sys::jint,
-                                                           class_data: *const ::std::os::raw::c_uchar,
-                                                           new_class_data_len: *mut rvmti_sys::jint,
-                                                           new_class_data: *mut *mut ::std::os::raw::c_uchar)
+pub extern "C" fn jvmti_event_class_file_load_hook_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                           _jni_env: *mut rvmti_sys::JNIEnv,
+                                                           _class_being_redefined: rvmti_sys::jclass,
+                                                           _loader: rvmti_sys::jobject,
+                                                           _name: *const ::std::os::raw::c_char,
+                                                           _protection_domain: rvmti_sys::jobject,
+                                                           _class_data_len: rvmti_sys::jint,
+                                                           _class_data: *const ::std::os::raw::c_uchar,
+                                                           _new_class_data_len: *mut rvmti_sys::jint,
+                                                           _new_class_data: *mut *mut ::std::os::raw::c_uchar)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_class_load_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                 jni_env: *mut rvmti_sys::JNIEnv,
-                                                 thread: rvmti_sys::jthread,
-                                                 klass: rvmti_sys::jclass)
+pub extern "C" fn jvmti_event_class_load_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                 _jni_env: *mut rvmti_sys::JNIEnv,
+                                                 _thread: rvmti_sys::jthread,
+                                                 _klass: rvmti_sys::jclass)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_class_prepare_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                    jni_env: *mut rvmti_sys::JNIEnv,
-                                                    thread: rvmti_sys::jthread,
-                                                    klass: rvmti_sys::jclass)
+pub extern "C" fn jvmti_event_class_prepare_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                    _jni_env: *mut rvmti_sys::JNIEnv,
+                                                    _thread: rvmti_sys::jthread,
+                                                    _klass: rvmti_sys::jclass)
 {
 }
 
@@ -138,14 +138,14 @@ pub extern "C" fn jvmti_event_compiled_method_load_handler(jvmti_env: *mut rvmti
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_compiled_method_unload_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                             method: rvmti_sys::jmethodID,
-                                                             code_addr: *const ::std::os::raw::c_void)
+pub extern "C" fn jvmti_event_compiled_method_unload_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                             _method: rvmti_sys::jmethodID,
+                                                             _code_addr: *const ::std::os::raw::c_void)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_data_dump_request_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv) {
+pub extern "C" fn jvmti_event_data_dump_request_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv) {
 }
 
 #[no_mangle]
@@ -169,194 +169,194 @@ pub extern "C" fn jvmti_event_dynamic_code_generated_handler(jvmti_env: *mut rvm
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_exception_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                jni_env: *mut rvmti_sys::JNIEnv,
-                                                thread: rvmti_sys::jthread,
-                                                method: rvmti_sys::jmethodID,
-                                                location: rvmti_sys::jlocation,
-                                                exception: rvmti_sys::jobject,
-                                                catch_method: rvmti_sys::jmethodID,
-                                                catch_location: rvmti_sys::jlocation)
+pub extern "C" fn jvmti_event_exception_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                _jni_env: *mut rvmti_sys::JNIEnv,
+                                                _thread: rvmti_sys::jthread,
+                                                _method: rvmti_sys::jmethodID,
+                                                _location: rvmti_sys::jlocation,
+                                                _exception: rvmti_sys::jobject,
+                                                _catch_method: rvmti_sys::jmethodID,
+                                                _catch_location: rvmti_sys::jlocation)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_exception_catch_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                      jni_env: *mut rvmti_sys::JNIEnv,
-                                                      thread: rvmti_sys::jthread,
-                                                      method: rvmti_sys::jmethodID,
-                                                      location: rvmti_sys::jlocation,
-                                                      exception: rvmti_sys::jobject)
+pub extern "C" fn jvmti_event_exception_catch_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                      _jni_env: *mut rvmti_sys::JNIEnv,
+                                                      _thread: rvmti_sys::jthread,
+                                                      _method: rvmti_sys::jmethodID,
+                                                      _location: rvmti_sys::jlocation,
+                                                      _exception: rvmti_sys::jobject)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_field_access_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                   jni_env: *mut rvmti_sys::JNIEnv,
-                                                   thread: rvmti_sys::jthread,
-                                                   method: rvmti_sys::jmethodID,
-                                                   location: rvmti_sys::jlocation,
-                                                   field_klass: rvmti_sys::jclass,
-                                                   object: rvmti_sys::jobject,
-                                                   field: rvmti_sys::jfieldID)
+pub extern "C" fn jvmti_event_field_access_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                   _jni_env: *mut rvmti_sys::JNIEnv,
+                                                   _thread: rvmti_sys::jthread,
+                                                   _method: rvmti_sys::jmethodID,
+                                                   _location: rvmti_sys::jlocation,
+                                                   _field_klass: rvmti_sys::jclass,
+                                                   _object: rvmti_sys::jobject,
+                                                   _field: rvmti_sys::jfieldID)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_field_modification_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                         jni_env: *mut rvmti_sys::JNIEnv,
-                                                         thread: rvmti_sys::jthread,
-                                                         method: rvmti_sys::jmethodID,
-                                                         location: rvmti_sys::jlocation,
-                                                         field_klass: rvmti_sys::jclass,
-                                                         object: rvmti_sys::jobject,
-                                                         field: rvmti_sys::jfieldID,
-                                                         signature_type: ::std::os::raw::c_char,
-                                                         new_value: rvmti_sys::jvalue)
+pub extern "C" fn jvmti_event_field_modification_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                         _jni_env: *mut rvmti_sys::JNIEnv,
+                                                         _thread: rvmti_sys::jthread,
+                                                         _method: rvmti_sys::jmethodID,
+                                                         _location: rvmti_sys::jlocation,
+                                                         _field_klass: rvmti_sys::jclass,
+                                                         _object: rvmti_sys::jobject,
+                                                         _field: rvmti_sys::jfieldID,
+                                                         _signature_type: ::std::os::raw::c_char,
+                                                         _new_value: rvmti_sys::jvalue)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_frame_pop_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                jni_env: *mut rvmti_sys::JNIEnv,
-                                                thread: rvmti_sys::jthread,
-                                                method: rvmti_sys::jmethodID,
-                                                was_popped_by_exception: rvmti_sys::jboolean)
+pub extern "C" fn jvmti_event_frame_pop_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                _jni_env: *mut rvmti_sys::JNIEnv,
+                                                _thread: rvmti_sys::jthread,
+                                                _method: rvmti_sys::jmethodID,
+                                                _was_popped_by_exception: rvmti_sys::jboolean)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_garbage_collection_finish_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv) {
+pub extern "C" fn jvmti_event_garbage_collection_finish_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv) {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_garbage_collection_start_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv) {
+pub extern "C" fn jvmti_event_garbage_collection_start_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv) {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_method_entry_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                   jni_env: *mut rvmti_sys::JNIEnv,
-                                                   thread: rvmti_sys::jthread,
-                                                   method: rvmti_sys::jmethodID)
+pub extern "C" fn jvmti_event_method_entry_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                   _jni_env: *mut rvmti_sys::JNIEnv,
+                                                   _thread: rvmti_sys::jthread,
+                                                   _method: rvmti_sys::jmethodID)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_method_exit_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                  jni_env: *mut rvmti_sys::JNIEnv,
-                                                  thread: rvmti_sys::jthread,
-                                                  method: rvmti_sys::jmethodID,
-                                                  was_popped_by_exception: rvmti_sys::jboolean,
-                                                  return_value: rvmti_sys::jvalue)
+pub extern "C" fn jvmti_event_method_exit_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                  _jni_env: *mut rvmti_sys::JNIEnv,
+                                                  _thread: rvmti_sys::jthread,
+                                                  _method: rvmti_sys::jmethodID,
+                                                  _was_popped_by_exception: rvmti_sys::jboolean,
+                                                  _return_value: rvmti_sys::jvalue)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_monitor_contended_enter_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                              jni_env: *mut rvmti_sys::JNIEnv,
-                                                              thread: rvmti_sys::jthread,
-                                                              object: rvmti_sys::jobject)
+pub extern "C" fn jvmti_event_monitor_contended_enter_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                              _jni_env: *mut rvmti_sys::JNIEnv,
+                                                              _thread: rvmti_sys::jthread,
+                                                              _object: rvmti_sys::jobject)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_monitor_contended_entered_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                                jni_env: *mut rvmti_sys::JNIEnv,
-                                                                thread: rvmti_sys::jthread,
-                                                                object: rvmti_sys::jobject)
+pub extern "C" fn jvmti_event_monitor_contended_entered_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                                _jni_env: *mut rvmti_sys::JNIEnv,
+                                                                _thread: rvmti_sys::jthread,
+                                                                _object: rvmti_sys::jobject)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_monitor_wait_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                   jni_env: *mut rvmti_sys::JNIEnv,
-                                                   thread: rvmti_sys::jthread,
-                                                   object: rvmti_sys::jobject,
-                                                   timeout: rvmti_sys::jlong)
+pub extern "C" fn jvmti_event_monitor_wait_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                   _jni_env: *mut rvmti_sys::JNIEnv,
+                                                   _thread: rvmti_sys::jthread,
+                                                   _object: rvmti_sys::jobject,
+                                                   _timeout: rvmti_sys::jlong)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_monitor_waited_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                     jni_env: *mut rvmti_sys::JNIEnv,
-                                                     thread: rvmti_sys::jthread,
-                                                     object: rvmti_sys::jobject,
-                                                     timed_out: rvmti_sys::jboolean)
+pub extern "C" fn jvmti_event_monitor_waited_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                     _jni_env: *mut rvmti_sys::JNIEnv,
+                                                     _thread: rvmti_sys::jthread,
+                                                     _object: rvmti_sys::jobject,
+                                                     _timed_out: rvmti_sys::jboolean)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_native_method_bind_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                         jni_env: *mut rvmti_sys::JNIEnv,
-                                                         thread: rvmti_sys::jthread,
-                                                         method: rvmti_sys::jmethodID,
-                                                         address: *mut ::std::os::raw::c_void,
-                                                         new_address_ptr: *mut *mut ::std::os::raw::c_void)
+pub extern "C" fn jvmti_event_native_method_bind_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                         _jni_env: *mut rvmti_sys::JNIEnv,
+                                                         _thread: rvmti_sys::jthread,
+                                                         _method: rvmti_sys::jmethodID,
+                                                         _address: *mut ::std::os::raw::c_void,
+                                                         _new_address_ptr: *mut *mut ::std::os::raw::c_void)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_object_free_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv, tag: rvmti_sys::jlong) {
+pub extern "C" fn jvmti_event_object_free_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv, _tag: rvmti_sys::jlong) {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_resource_exhausted_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                         jni_env: *mut rvmti_sys::JNIEnv,
-                                                         flags: rvmti_sys::jint,
-                                                         reserved: *const ::std::os::raw::c_void,
-                                                         description: *const ::std::os::raw::c_char)
+pub extern "C" fn jvmti_event_resource_exhausted_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                         _jni_env: *mut rvmti_sys::JNIEnv,
+                                                         _flags: rvmti_sys::jint,
+                                                         _reserved: *const ::std::os::raw::c_void,
+                                                         _description: *const ::std::os::raw::c_char)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_single_step_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                  jni_env: *mut rvmti_sys::JNIEnv,
-                                                  thread: rvmti_sys::jthread,
-                                                  method: rvmti_sys::jmethodID,
-                                                  location: rvmti_sys::jlocation)
+pub extern "C" fn jvmti_event_single_step_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                  _jni_env: *mut rvmti_sys::JNIEnv,
+                                                  _thread: rvmti_sys::jthread,
+                                                  _method: rvmti_sys::jmethodID,
+                                                  _location: rvmti_sys::jlocation)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_thread_end_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                 jni_env: *mut rvmti_sys::JNIEnv,
-                                                 thread: rvmti_sys::jthread)
+pub extern "C" fn jvmti_event_thread_end_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                 _jni_env: *mut rvmti_sys::JNIEnv,
+                                                 _thread: rvmti_sys::jthread)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_thread_start_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                   jni_env: *mut rvmti_sys::JNIEnv,
-                                                   thread: rvmti_sys::jthread)
+pub extern "C" fn jvmti_event_thread_start_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                   _jni_env: *mut rvmti_sys::JNIEnv,
+                                                   _thread: rvmti_sys::jthread)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_vm_death_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                               jni_env: *mut rvmti_sys::JNIEnv)
+pub extern "C" fn jvmti_event_vm_death_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                               _jni_env: *mut rvmti_sys::JNIEnv)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_vm_init_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                              jni_env: *mut rvmti_sys::JNIEnv,
-                                              thread: rvmti_sys::jthread)
+pub extern "C" fn jvmti_event_vm_init_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                              _jni_env: *mut rvmti_sys::JNIEnv,
+                                              _thread: rvmti_sys::jthread)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_vm_object_alloc_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                                      jni_env: *mut rvmti_sys::JNIEnv,
-                                                      thread: rvmti_sys::jthread,
-                                                      object: rvmti_sys::jobject,
-                                                      object_klass: rvmti_sys::jclass,
-                                                      size: rvmti_sys::jlong)
+pub extern "C" fn jvmti_event_vm_object_alloc_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                      _jni_env: *mut rvmti_sys::JNIEnv,
+                                                      _thread: rvmti_sys::jthread,
+                                                      _object: rvmti_sys::jobject,
+                                                      _object_klass: rvmti_sys::jclass,
+                                                      _size: rvmti_sys::jlong)
 {
 }
 
 #[no_mangle]
-pub extern "C" fn jvmti_event_vm_start_handler(jvmti_env: *mut rvmti_sys::jvmtiEnv,
-                                               jni_env: *mut rvmti_sys::JNIEnv)
+pub extern "C" fn jvmti_event_vm_start_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                               _jni_env: *mut rvmti_sys::JNIEnv)
 {
 }
 

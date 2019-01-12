@@ -169,10 +169,10 @@ impl DumpFile {
     }
 
     pub fn write_compiled_method_load(&mut self, name: rvmti::MethodName, class_signature: rvmti::ClassSignature,
-                                      class_source_file_name: Option<String>, address: usize, length: usize,
-                                      line_numbers: Option<Vec<rvmti::LineNumberEntry>>,
-                                      address_locations: Option<Vec<rvmti::AddressLocationEntry>>,
-                                      stack_info: Option<Vec<super::StackInfo>>,
+                                      _class_source_file_name: Option<String>, address: usize, length: usize,
+                                      _line_numbers: Option<Vec<rvmti::LineNumberEntry>>,
+                                      _address_locations: Option<Vec<rvmti::AddressLocationEntry>>,
+                                      _stack_info: Option<Vec<super::StackInfo>>,
                                       code_index: u64, timestamp: i64, code: &Vec<u8>) -> Result<(), WriteRecordError>
     {
         let pid = get_pid();
@@ -238,7 +238,7 @@ impl DumpFile {
         Ok(())
     }
 
-    fn write_line_numbers_without_stack_info(&mut self, name: &rvmti::MethodName,
+    fn write_line_numbers_without_stack_info(&mut self, _name: &rvmti::MethodName,
                                              class_signature: &rvmti::ClassSignature,
                                              class_source_file_name: &str,
                                              line_numbers: &Vec<rvmti::LineNumberEntry>,
