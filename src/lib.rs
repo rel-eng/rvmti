@@ -186,26 +186,24 @@ fn initialize_agent<'a>(env: &mut rvmti::JvmtiEnv, _options: &Option<String>) ->
 }
 
 fn add_capabilities<'a>(env: &mut rvmti::JvmtiEnv) -> Result<(), AgentInitError> {
-    let mut capabilities = rvmti::JvmtiCapabilities::new_empty_capabilities()
-        .map_err(AgentInitError::UnableToAllocateCapabilities)?;
+    let mut capabilities = rvmti::JvmtiCapabilities::new_empty_capabilities();
 
-    capabilities.set_can_generate_all_class_hook_events(true);
-    capabilities.set_can_tag_objects(true);
-    capabilities.set_can_generate_object_free_events(true);
-    capabilities.set_can_get_source_file_name(true);
-    capabilities.set_can_get_line_numbers(true);
-    capabilities.set_can_generate_vm_object_alloc_events(true);
-    capabilities.set_can_generate_compiled_method_load_events(true);
+    capabilities.can_generate_all_class_hook_events();
+    capabilities.can_tag_objects();
+    capabilities.can_generate_object_free_events();
+    capabilities.can_get_source_file_name();
+    capabilities.can_get_line_numbers();
+    capabilities.can_generate_vm_object_alloc_events();
+    capabilities.can_generate_compiled_method_load_events();
     env.add_capabilities(&capabilities).map_err(AgentInitError::UnableToAddCapabilities)?;
     debug!("Capabilities added to the environment");
     Ok(())
 }
 
 fn set_event_callbacks<'a>(env: &mut rvmti::JvmtiEnv) -> Result<(), AgentInitError> {
-    let mut settings = rvmti::JvmtiEventCallbacksSettings::new_empty_settings()
-        .map_err(AgentInitError::UnableToAllocateEventCallbackSettings)?;
-    settings.set_compiled_method_load_enabled(true);
-    settings.set_dynamic_code_generated_enabled(true);
+    let mut settings = rvmti::JvmtiEventCallbacksSettings::new_empty_settings();
+    settings.compiled_method_load_enabled();
+    settings.dynamic_code_generated_enabled();
     env.set_event_callbacks_settings(&settings).map_err(AgentInitError::UnableToSetEventCallbacks)?;
     debug!("Event callbacks set for the environment");
     Ok(())
@@ -478,12 +476,8 @@ pub struct StackInfo {
 
 #[derive(Fail, Debug)]
 enum AgentInitError {
-    #[fail(display = "Failed to allocate capabilities: {}", _0)]
-    UnableToAllocateCapabilities(#[cause] rvmti::AllocError),
     #[fail(display = "Failed to add capabilities: {}", _0)]
     UnableToAddCapabilities(#[cause] rvmti::JvmtiError),
-    #[fail(display = "Failed to allocate event callback settings: {}", _0)]
-    UnableToAllocateEventCallbackSettings(#[cause] rvmti::AllocError),
     #[fail(display = "Failed to set event callbacks: {}", _0)]
     UnableToSetEventCallbacks(#[cause] rvmti::JvmtiError),
     #[fail(display = "Failed to enable events: {}", _0)]

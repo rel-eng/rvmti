@@ -8,4 +8,3 @@
 #include <jni.h>
 #include <jvmti.h>
 #include <jvmticmlr.h>
-#include "glue.h"

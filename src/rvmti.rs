@@ -6,12 +6,13 @@
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::ffi::CStr;
-use std::os::raw::{c_char, c_void};
+use std::os::raw::{c_char, c_uchar, c_void};
 use std::string::FromUtf8Error;
 use std::str;
 use std::ptr;
 use std::panic;
 use std::slice;
+use std::mem::size_of;
 
 use log::{debug, warn, error};
 use failure_derive::Fail;
@@ -358,6 +359,16 @@ pub extern "C" fn jvmti_event_vm_start_handler(_jvmti_env: *mut rvmti_sys::jvmti
 {
 }
 
+#[no_mangle]
+pub extern "C" fn jvmti_event_sampled_object_alloc_handler(_jvmti_env: *mut rvmti_sys::jvmtiEnv,
+                                                           _jni_env: *mut rvmti_sys::JNIEnv,
+                                                           _thread: rvmti_sys::jthread,
+                                                           _object: rvmti_sys::jobject,
+                                                           _object_klass: rvmti_sys::jclass,
+                                                           _size: rvmti_sys::jlong)
+{
+}
+
 #[derive(Debug)]
 pub struct Jvm {
     vm: *mut rvmti_sys::JavaVM,
@@ -374,12 +385,12 @@ unsafe impl Send for JvmtiEnv {}
 
 #[derive(Debug)]
 pub struct JvmtiCapabilities {
-    caps: *mut rvmti_sys::jvmtiCapabilities,
+    caps: rvmti_sys::jvmtiCapabilities,
 }
 
 #[derive(Debug)]
 pub struct JvmtiEventCallbacksSettings {
-    settings: *mut rvmti_sys::JvmtiEventCallbacksStatus,
+    settings: rvmti_sys::jvmtiEventCallbacks,
 }
 
 #[derive(Debug)]
@@ -619,12 +630,6 @@ pub enum JvmtiError {
 }
 
 #[derive(Fail, Debug)]
-pub enum AllocError {
-    #[fail(display = "Out of memory")]
-    OutOfMemory,
-}
-
-#[derive(Fail, Debug)]
 pub enum GetMethodNameError {
     #[fail(display = "JVMTI method call error: {}", _0)]
     VmError(#[cause] JvmtiError),
@@ -668,11 +673,11 @@ impl Jvm {
 
     pub fn get_jvmti_env(&self, version: JvmtiVersion) -> Result<JvmtiEnv, JniError> {
         unsafe {
-            let mut env: *mut rvmti_sys::jvmtiEnv = ptr::null_mut();
-            let result = rvmti_sys::java_vm_get_env(self.vm, &mut env, rvmti_sys::jint::from(version));
+            let mut env: *mut c_void = ptr::null_mut();
+            let result = (*(*self.vm)).GetEnv.unwrap()(self.vm, &mut env, rvmti_sys::jint::from(version));
             if result == rvmti_sys::JNI_OK {
                 if !env.is_null() {
-                    Ok(JvmtiEnv{env: env, owned: true})
+                    Ok(JvmtiEnv{env: env as *mut rvmti_sys::jvmtiEnv, owned: true})
                 } else {
                     Err(JniError::UnknownError)
                 }
@@ -692,7 +697,18 @@ impl JvmtiEnv {
 
     pub fn add_capabilities(&mut self, capabilities: &JvmtiCapabilities) -> Result<(), JvmtiError> {
         unsafe {
-            let result = rvmti_sys::jvmti_env_add_capabilities(self.env, capabilities.caps);
+            let result = (*(*self.env)).AddCapabilities.unwrap()(self.env, &capabilities.caps);
+            if result == rvmti_sys::jvmtiError_JVMTI_ERROR_NONE {
+                return Ok(());
+            } else {
+                return Err(JvmtiError::from(result));
+            }
+        }
+    }
+
+    pub fn relinquish_capabilities(&mut self, capabilities: &JvmtiCapabilities) -> Result<(), JvmtiError> {
+        unsafe {
+            let result = (*(*self.env)).RelinquishCapabilities.unwrap()(self.env, &capabilities.caps);
             if result == rvmti_sys::jvmtiError_JVMTI_ERROR_NONE {
                 return Ok(());
             } else {
@@ -703,7 +719,8 @@ impl JvmtiEnv {
 
     pub fn set_event_callbacks_settings(&mut self, settings: &JvmtiEventCallbacksSettings) -> Result<(), JvmtiError> {
         unsafe {
-            let result = rvmti_sys::set_jvmti_event_callbacks(self.env, settings.settings);
+            let result = (*(*self.env)).SetEventCallbacks.unwrap()(self.env, &settings.settings,
+                                                                   size_of::<rvmti_sys::jvmtiEventCallbacks>() as rvmti_sys::jint);
             if result == rvmti_sys::jvmtiError_JVMTI_ERROR_NONE {
                 return Ok(());
             } else {
@@ -716,10 +733,22 @@ impl JvmtiEnv {
                                        event_thread: Option<JThread>) -> Result<(), JvmtiError>
     {
         unsafe {
-            let result = rvmti_sys::jvmti_env_set_event_notification_mode(self.env,
-                rvmti_sys::jvmtiEventMode::from(mode),
-                rvmti_sys::jvmtiEvent::from(event_type),
-                event_thread.map_or_else(|| ptr::null_mut(), |t| t.thread ));
+            let result = (*(*self.env)).SetEventNotificationMode.unwrap()(self.env,
+                                                                          rvmti_sys::jvmtiEventMode::from(mode),
+                                                                          rvmti_sys::jvmtiEvent::from(event_type),
+                                                                          event_thread.map_or_else(|| ptr::null_mut(), |t| t.thread ));
+            if result == rvmti_sys::jvmtiError_JVMTI_ERROR_NONE {
+                return Ok(());
+            } else {
+                return Err(JvmtiError::from(result));
+            }
+        }
+    }
+
+    pub fn set_heap_sampling_interval(&mut self, sampling_interval: i32) -> Result<(), JvmtiError> {
+        unsafe {
+            let result = (*(*self.env)).SetHeapSamplingInterval.unwrap()(self.env,
+                                                                         sampling_interval as rvmti_sys::jint);
             if result == rvmti_sys::jvmtiError_JVMTI_ERROR_NONE {
                 return Ok(());
             } else {
@@ -733,8 +762,8 @@ impl JvmtiEnv {
             let mut name_ptr: *mut ::std::os::raw::c_char = ptr::null_mut();
             let mut signature_ptr: *mut ::std::os::raw::c_char = ptr::null_mut();
             let mut generic_signature_ptr: *mut ::std::os::raw::c_char = ptr::null_mut();
-            let result = rvmti_sys::jvmti_env_get_method_name(
-                self.env, method.method, &mut name_ptr, &mut signature_ptr, &mut generic_signature_ptr);
+            let result = (*(*self.env)).GetMethodName.unwrap()(self.env, method.method, &mut name_ptr,
+                                                               &mut signature_ptr, &mut generic_signature_ptr);
             let name = name_ptr.as_ref().map(|v| VmOwnedString {ptr:v, env: &self});
             let signature = signature_ptr.as_ref().map(|v| VmOwnedString {ptr: v, env: &self});
             let generic_signature = generic_signature_ptr.as_ref().map(|v| VmOwnedString {ptr: v, env: &self});
@@ -755,7 +784,7 @@ impl JvmtiEnv {
     pub fn get_method_declaring_class(&mut self, method: &JMethodId) -> Result<JClass, JvmtiError> {
         unsafe {
             let mut class: rvmti_sys::jclass = ptr::null_mut();
-            let result = rvmti_sys::jvmti_env_get_method_declaring_class(self.env, method.method, &mut class);
+            let result = (*(*self.env)).GetMethodDeclaringClass.unwrap()(self.env, method.method, &mut class);
             if result == rvmti_sys::jvmtiError_JVMTI_ERROR_NONE {
                 return Ok(JClass{class});
             } else {
@@ -768,8 +797,8 @@ impl JvmtiEnv {
         unsafe {
             let mut signature_ptr: *mut ::std::os::raw::c_char = ptr::null_mut();
             let mut generic_signature_ptr: *mut ::std::os::raw::c_char = ptr::null_mut();
-            let result = rvmti_sys::jvmti_env_get_class_signature(
-                self.env, class.class, &mut signature_ptr, &mut generic_signature_ptr);
+            let result = (*(*self.env)).GetClassSignature.unwrap()(self.env, class.class,
+                                                                   &mut signature_ptr, &mut generic_signature_ptr);
             let signature = signature_ptr.as_ref().map(|v| VmOwnedString {ptr: v, env: &self});
             let generic_signature = generic_signature_ptr.as_ref().map(|v| VmOwnedString {ptr: v, env: &self});
             if result == rvmti_sys::jvmtiError_JVMTI_ERROR_NONE {
@@ -787,7 +816,7 @@ impl JvmtiEnv {
     pub fn get_source_file_name(&mut self, class: &JClass) -> Result<Option<String>, GetSourceFileNameError> {
         unsafe {
             let mut source_name_ptr: *mut ::std::os::raw::c_char = ptr::null_mut();
-            let result = rvmti_sys::jvmti_env_get_source_file_name(self.env, class.class, &mut source_name_ptr);
+            let result = (*(*self.env)).GetSourceFileName.unwrap()(self.env, class.class, &mut source_name_ptr);
             let source_name = source_name_ptr.as_ref().map(|v| VmOwnedString {ptr: v, env: &self});
             if result == rvmti_sys::jvmtiError_JVMTI_ERROR_NONE {
                 let source_name_string = source_name.as_ref().map_or_else(|| Ok(None), |s| s.to_string()
@@ -805,7 +834,7 @@ impl JvmtiEnv {
         unsafe {
             let mut entry_count: rvmti_sys::jint = 0 as rvmti_sys::jint;
             let mut table_ptr: *mut rvmti_sys::jvmtiLineNumberEntry = ptr::null_mut();
-            let result = rvmti_sys::jvmti_env_get_line_number_table(self.env, method.method, &mut entry_count, &mut table_ptr);
+            let result = (*(*self.env)).GetLineNumberTable.unwrap()(self.env, method.method, &mut entry_count, &mut table_ptr);
             let table = table_ptr.as_ref().map(|v| VmOwnedLineNumberTable{ptr:v, entry_count: entry_count, env: &self});
             if result == rvmti_sys::jvmtiError_JVMTI_ERROR_NONE {
                 return Ok(table.as_ref().and_then(|t| t.as_line_number_slice()).map(|t| t.iter()
@@ -821,7 +850,7 @@ impl JvmtiEnv {
     pub fn check_is_method_native(&mut self, method: &JMethodId) -> Result<bool, JvmtiError> {
         unsafe {
             let mut is_native: rvmti_sys::jboolean = 0 as rvmti_sys::jboolean;
-            let result = rvmti_sys::jvmti_env_is_method_native(self.env, method.method, &mut is_native);
+            let result = (*(*self.env)).IsMethodNative.unwrap()(self.env, method.method, &mut is_native);
             if result == rvmti_sys::jvmtiError_JVMTI_ERROR_NONE {
                 return Ok(is_native != 0);
             } else {
@@ -839,7 +868,7 @@ impl Drop for JvmtiEnv {
             return;
         }
         unsafe {
-            let result = rvmti_sys::jvmti_env_dispose_environment(self.env);
+            let result = (*(*self.env)).DisposeEnvironment.unwrap()(self.env);
             if result != rvmti_sys::jvmtiError_JVMTI_ERROR_NONE {
                 warn!("Failed to dispose of JVMTI environment: {}", JvmtiError::from(result))
             } else {
@@ -852,943 +881,338 @@ impl Drop for JvmtiEnv {
 
 impl JvmtiCapabilities {
 
-    pub fn new_empty_capabilities() -> Result<JvmtiCapabilities, AllocError> {
-        unsafe {
-            let caps = rvmti_sys::alloc_empty_jvmti_capabilities();
-            if caps.is_null() {
-                return Err(AllocError::OutOfMemory);
-            } else {
-                debug!("JVMTI capabilities allocated");
-                return Ok(JvmtiCapabilities { caps: caps });
-            }
-        }
+    pub fn new_empty_capabilities() -> JvmtiCapabilities {
+        JvmtiCapabilities{caps: rvmti_sys::jvmtiCapabilities{
+            _bitfield_1: rvmti_sys::jvmtiCapabilities::new_bitfield_1(0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                                                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                                                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                                                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                                                      0, 0, 0, 0),
+            __bindgen_align: []
+        }}
     }
 
-    pub fn set_can_tag_objects(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_tag_objects(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_tag_objects(&mut self) {
+        self.caps.set_can_tag_objects(1)
     }
 
-    pub fn set_can_generate_field_modification_events(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_field_modification_events(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_field_modification_events(&mut self) {
+        self.caps.set_can_generate_field_modification_events(1)
     }
 
-    pub fn set_can_generate_field_access_events(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_field_access_events(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_field_access_events(&mut self) {
+        self.caps.set_can_generate_field_access_events(1)
     }
 
-    pub fn set_can_get_bytecodes(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_get_bytecodes(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_get_bytecodes(&mut self) {
+        self.caps.set_can_get_bytecodes(1)
     }
 
-    pub fn set_can_get_synthetic_attribute(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_get_synthetic_attribute(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_get_synthetic_attribute(&mut self) {
+        self.caps.set_can_get_synthetic_attribute(1)
     }
 
-    pub fn set_can_get_owned_monitor_info(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_get_owned_monitor_info(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_get_owned_monitor_info(&mut self) {
+        self.caps.set_can_get_owned_monitor_info(1)
     }
 
-    pub fn set_can_get_current_contended_monitor(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_get_current_contended_monitor(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_get_current_contended_monitor(&mut self) {
+        self.caps.set_can_get_current_contended_monitor(1)
     }
 
-    pub fn set_can_get_monitor_info(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_get_monitor_info(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_get_monitor_info(&mut self) {
+        self.caps.set_can_get_monitor_info(1)
     }
 
-    pub fn set_can_pop_frame(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_pop_frame(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_pop_frame(&mut self) {
+        self.caps.set_can_pop_frame(1)
     }
 
-    pub fn set_can_redefine_classes(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_redefine_classes(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_redefine_classes(&mut self) {
+        self.caps.set_can_redefine_classes(1)
     }
 
-    pub fn set_can_signal_thread(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_signal_thread(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_signal_thread(&mut self) {
+        self.caps.set_can_signal_thread(1)
     }
 
-    pub fn set_can_get_source_file_name(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_get_source_file_name(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_get_source_file_name(&mut self) {
+        self.caps.set_can_get_source_file_name(1)
     }
 
-    pub fn set_can_get_line_numbers(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_get_line_numbers(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_get_line_numbers(&mut self) {
+        self.caps.set_can_get_line_numbers(1)
     }
 
-    pub fn set_can_get_source_debug_extension(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_get_source_debug_extension(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_get_source_debug_extension(&mut self) {
+        self.caps.set_can_get_source_debug_extension(1)
     }
 
-    pub fn set_can_access_local_variables(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_access_local_variables(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_access_local_variables(&mut self) {
+        self.caps.set_can_access_local_variables(1)
     }
 
-    pub fn set_can_maintain_original_method_order(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_maintain_original_method_order(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_maintain_original_method_order(&mut self) {
+        self.caps.set_can_maintain_original_method_order(1)
     }
 
-    pub fn set_can_generate_single_step_events(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_single_step_events(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_single_step_events(&mut self) {
+        self.caps.set_can_generate_single_step_events(1)
     }
 
-    pub fn set_can_generate_exception_events(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_exception_events(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_exception_events(&mut self) {
+        self.caps.set_can_generate_exception_events(1)
     }
 
-    pub fn set_can_generate_frame_pop_events(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_frame_pop_events(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_frame_pop_events(&mut self) {
+        self.caps.set_can_generate_frame_pop_events(1)
     }
 
-    pub fn set_can_generate_breakpoint_events(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_breakpoint_events(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_breakpoint_events(&mut self) {
+        self.caps.set_can_generate_breakpoint_events(1)
     }
 
-    pub fn set_can_suspend(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_suspend(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_suspend(&mut self) {
+        self.caps.set_can_suspend(1)
     }
 
-    pub fn set_can_redefine_any_class(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_redefine_any_class(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_redefine_any_class(&mut self) {
+        self.caps.set_can_redefine_any_class(1)
     }
 
-    pub fn set_can_get_current_thread_cpu_time(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_get_current_thread_cpu_time(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_get_current_thread_cpu_time(&mut self) {
+        self.caps.set_can_get_current_thread_cpu_time(1)
     }
 
-    pub fn set_can_get_thread_cpu_time(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_get_thread_cpu_time(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_get_thread_cpu_time(&mut self) {
+        self.caps.set_can_get_thread_cpu_time(1)
     }
 
-    pub fn set_can_generate_method_entry_events(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_method_entry_events(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_method_entry_events(&mut self) {
+        self.caps.set_can_generate_method_entry_events(1)
     }
 
-    pub fn set_can_generate_method_exit_events(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_method_exit_events(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_method_exit_events(&mut self) {
+        self.caps.set_can_generate_method_exit_events(1)
     }
 
-    pub fn set_can_generate_all_class_hook_events(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_all_class_hook_events(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_all_class_hook_events(&mut self) {
+        self.caps.set_can_generate_all_class_hook_events(1)
     }
 
-    pub fn set_can_generate_compiled_method_load_events(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_compiled_method_load_events(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_compiled_method_load_events(&mut self) {
+        self.caps.set_can_generate_compiled_method_load_events(1)
     }
 
-    pub fn set_can_generate_monitor_events(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_monitor_events(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_monitor_events(&mut self) {
+        self.caps.set_can_generate_monitor_events(1)
     }
 
-    pub fn set_can_generate_vm_object_alloc_events(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_vm_object_alloc_events(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_vm_object_alloc_events(&mut self) {
+        self.caps.set_can_generate_vm_object_alloc_events(1)
     }
 
-    pub fn set_can_generate_native_method_bind_events(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_native_method_bind_events(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_native_method_bind_events(&mut self) {
+        self.caps.set_can_generate_native_method_bind_events(1)
     }
 
-    pub fn set_can_generate_garbage_collection_events(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_garbage_collection_events(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_garbage_collection_events(&mut self) {
+        self.caps.set_can_generate_garbage_collection_events(1)
     }
 
-    pub fn set_can_generate_object_free_events(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_object_free_events(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_object_free_events(&mut self) {
+        self.caps.set_can_generate_object_free_events(1)
     }
 
-    pub fn set_can_force_early_return(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_force_early_return(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_force_early_return(&mut self) {
+        self.caps.set_can_force_early_return(1)
     }
 
-    pub fn set_can_get_owned_monitor_stack_depth_info(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_get_owned_monitor_stack_depth_info(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_get_owned_monitor_stack_depth_info(&mut self) {
+        self.caps.set_can_get_owned_monitor_stack_depth_info(1)
     }
 
-    pub fn set_can_get_constant_pool(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_get_constant_pool(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_get_constant_pool(&mut self) {
+        self.caps.set_can_get_constant_pool(1)
     }
 
-    pub fn set_can_set_native_method_prefix(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_set_native_method_prefix(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_set_native_method_prefix(&mut self) {
+        self.caps.set_can_set_native_method_prefix(1)
     }
 
-    pub fn set_can_retransform_classes(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_retransform_classes(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_retransform_classes(&mut self) {
+        self.caps.set_can_retransform_classes(1)
     }
 
-    pub fn set_can_retransform_any_class(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_retransform_any_class(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_retransform_any_class(&mut self) {
+        self.caps.set_can_retransform_any_class(1)
     }
 
-    pub fn set_can_generate_resource_exhaustion_heap_events(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_resource_exhaustion_heap_events(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_resource_exhaustion_heap_events(&mut self) {
+        self.caps.set_can_generate_resource_exhaustion_heap_events(1)
     }
 
-    pub fn set_can_generate_resource_exhaustion_threads_events(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_resource_exhaustion_threads_events(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_resource_exhaustion_threads_events(&mut self) {
+        self.caps.set_can_generate_resource_exhaustion_threads_events(1)
     }
 
-    pub fn set_can_generate_early_vmstart(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_early_vmstart(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_early_vmstart(&mut self) {
+        self.caps.set_can_generate_early_vmstart(1)
     }
 
-    pub fn set_can_generate_early_class_hook_events(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_capability_can_generate_early_class_hook_events(self.caps, if value { 1 } else { 0 });
-        }
+    pub fn can_generate_early_class_hook_events(&mut self) {
+        self.caps.set_can_generate_early_class_hook_events(1)
     }
 
-    pub fn get_can_tag_objects(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_tag_objects(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_field_modification_events(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_field_modification_events(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_field_access_events(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_field_access_events(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_get_bytecodes(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_get_bytecodes(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_get_synthetic_attribute(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_get_synthetic_attribute(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_get_owned_monitor_info(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_get_owned_monitor_info(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_get_current_contended_monitor(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_get_current_contended_monitor(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_get_monitor_info(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_get_monitor_info(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_pop_frame(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_pop_frame(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_redefine_classes(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_redefine_classes(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_signal_thread(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_signal_thread(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_get_source_file_name(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_get_source_file_name(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_get_line_numbers(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_get_line_numbers(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_get_source_debug_extension(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_get_source_debug_extension(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_access_local_variables(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_access_local_variables(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_maintain_original_method_order(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_maintain_original_method_order(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_single_step_events(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_single_step_events(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_exception_events(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_exception_events(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_frame_pop_events(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_frame_pop_events(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_breakpoint_events(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_breakpoint_events(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_suspend(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_suspend(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_redefine_any_class(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_redefine_any_class(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_get_current_thread_cpu_time(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_get_current_thread_cpu_time(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_get_thread_cpu_time(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_get_thread_cpu_time(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_method_entry_events(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_method_entry_events(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_method_exit_events(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_method_exit_events(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_all_class_hook_events(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_all_class_hook_events(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_compiled_method_load_events(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_compiled_method_load_events(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_monitor_events(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_monitor_events(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_vm_object_alloc_events(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_vm_object_alloc_events(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_native_method_bind_events(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_native_method_bind_events(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_garbage_collection_events(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_garbage_collection_events(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_object_free_events(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_object_free_events(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_force_early_return(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_force_early_return(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_get_owned_monitor_stack_depth_info(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_get_owned_monitor_stack_depth_info(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_get_constant_pool(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_get_constant_pool(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_set_native_method_prefix(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_set_native_method_prefix(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_retransform_classes(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_retransform_classes(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_retransform_any_class(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_retransform_any_class(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_resource_exhaustion_heap_events(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_resource_exhaustion_heap_events(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_resource_exhaustion_threads_events(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_resource_exhaustion_threads_events(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_early_vmstart(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_early_vmstart(self.caps) != 0
-        }
-    }
-
-    pub fn get_can_generate_early_class_hook_events(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_capability_can_generate_early_class_hook_events(self.caps) != 0
-        }
-    }
-
-}
-
-impl Drop for JvmtiCapabilities {
-
-    fn drop(&mut self) {
-        unsafe {
-            rvmti_sys::free_jvmti_capabilities(self.caps);
-            debug!("Capabilities freed");
-        }
+    pub fn can_generate_sampled_object_alloc_events(&mut self) {
+        self.caps.set_can_generate_sampled_object_alloc_events(1)
     }
 
 }
 
 impl JvmtiEventCallbacksSettings {
 
-    pub fn new_empty_settings() -> Result<JvmtiEventCallbacksSettings, AllocError> {
-        unsafe {
-            let settings = rvmti_sys::alloc_empty_jvmti_event_callback_status();
-            if settings.is_null() {
-                return Err(AllocError::OutOfMemory);
-            } else {
-                debug!("Event callback settings allocated");
-                return Ok(JvmtiEventCallbacksSettings { settings });
-            }
-        }
+    pub fn new_empty_settings() -> JvmtiEventCallbacksSettings {
+        JvmtiEventCallbacksSettings{ settings: rvmti_sys::jvmtiEventCallbacks { VMInit: None,
+            VMDeath: None, ThreadStart: None, ThreadEnd: None, ClassFileLoadHook: None,
+            ClassLoad: None, ClassPrepare: None, VMStart: None, Exception: None,
+            ExceptionCatch: None, SingleStep: None, FramePop: None, Breakpoint: None,
+            FieldAccess: None, FieldModification: None, MethodEntry: None, MethodExit: None,
+            NativeMethodBind: None, CompiledMethodLoad: None, CompiledMethodUnload: None,
+            DynamicCodeGenerated: None, DataDumpRequest: None, reserved72: None, MonitorWait: None,
+            MonitorWaited: None, MonitorContendedEnter: None, MonitorContendedEntered: None,
+            reserved77: None, reserved78: None, reserved79: None, ResourceExhausted: None,
+            GarbageCollectionStart: None, GarbageCollectionFinish: None, ObjectFree: None,
+            VMObjectAlloc: None, reserved85: None, SampledObjectAlloc: None }}
     }
 
-    pub fn set_vm_init_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_vm_init_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn vm_init_enabled(&mut self) {
+        self.settings.VMInit = Some(jvmti_event_vm_init_handler)
     }
 
-    pub fn set_vm_death_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_vm_death_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn vm_death_enabled(&mut self) {
+        self.settings.VMDeath = Some(jvmti_event_vm_death_handler)
     }
 
-    pub fn set_thread_start_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_thread_start_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn thread_start_enabled(&mut self) {
+        self.settings.ThreadStart = Some(jvmti_event_thread_start_handler)
     }
 
-    pub fn set_thread_end_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_thread_end_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn thread_end_enabled(&mut self) {
+        self.settings.ThreadEnd = Some(jvmti_event_thread_end_handler)
     }
 
-    pub fn set_class_file_load_hook_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_class_file_load_hook_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn class_file_load_hook_enabled(&mut self) {
+        self.settings.ClassFileLoadHook = Some(jvmti_event_class_file_load_hook_handler)
     }
 
-    pub fn set_class_load_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_class_load_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn class_load_enabled(&mut self) {
+        self.settings.ClassLoad = Some(jvmti_event_class_load_handler)
     }
 
-    pub fn set_class_prepare_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_class_prepare_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn class_prepare_enabled(&mut self) {
+        self.settings.ClassPrepare = Some(jvmti_event_class_prepare_handler)
     }
 
-    pub fn set_vm_start_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_vm_start_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn vm_start_enabled(&mut self) {
+        self.settings.VMStart = Some(jvmti_event_vm_start_handler)
     }
 
-    pub fn set_exception_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_exception_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn exception_enabled(&mut self) {
+        self.settings.Exception = Some(jvmti_event_exception_handler)
     }
 
-    pub fn set_exception_catch_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_exception_catch_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn exception_catch_enabled(&mut self) {
+        self.settings.ExceptionCatch = Some(jvmti_event_exception_catch_handler)
     }
 
-    pub fn set_single_step_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_single_step_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn single_step_enabled(&mut self) {
+        self.settings.SingleStep = Some(jvmti_event_single_step_handler)
     }
 
-    pub fn set_frame_pop_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_frame_pop_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn frame_pop_enabled(&mut self) {
+        self.settings.FramePop = Some(jvmti_event_frame_pop_handler)
     }
 
-    pub fn set_breakpoint_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_breakpoint_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn breakpoint_enabled(&mut self) {
+        self.settings.Breakpoint = Some(jvmti_event_breakpoint_handler)
     }
 
-    pub fn set_field_access_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_field_access_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn field_access_enabled(&mut self) {
+        self.settings.FieldAccess = Some(jvmti_event_field_access_handler)
     }
 
-    pub fn set_field_modification_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_field_modification_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn field_modification_enabled(&mut self) {
+        self.settings.FieldModification = Some(jvmti_event_field_modification_handler)
     }
 
-    pub fn set_method_entry_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_method_entry_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn method_entry_enabled(&mut self) {
+        self.settings.MethodEntry = Some(jvmti_event_method_entry_handler)
     }
 
-    pub fn set_method_exit_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_method_exit_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn method_exit_enabled(&mut self) {
+        self.settings.MethodExit = Some(jvmti_event_method_exit_handler)
     }
 
-    pub fn set_native_method_bind_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_native_method_bind_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn native_method_bind_enabled(&mut self) {
+        self.settings.NativeMethodBind = Some(jvmti_event_native_method_bind_handler)
     }
 
-    pub fn set_compiled_method_load_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_compiled_method_load_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn compiled_method_load_enabled(&mut self) {
+        self.settings.CompiledMethodLoad = Some(jvmti_event_compiled_method_load_handler)
     }
 
-    pub fn set_compiled_method_unload_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_compiled_method_unload_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn compiled_method_unload_enabled(&mut self) {
+        self.settings.CompiledMethodUnload = Some(jvmti_event_compiled_method_unload_handler)
     }
 
-    pub fn set_dynamic_code_generated_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_dynamic_code_generated_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn dynamic_code_generated_enabled(&mut self) {
+        self.settings.DynamicCodeGenerated = Some(jvmti_event_dynamic_code_generated_handler)
     }
 
-    pub fn set_data_dump_request_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_data_dump_request_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn data_dump_request_enabled(&mut self) {
+        self.settings.DataDumpRequest = Some(jvmti_event_data_dump_request_handler)
     }
 
-    pub fn set_monitor_wait_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_monitor_wait_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn monitor_wait_enabled(&mut self) {
+        self.settings.MonitorWait = Some(jvmti_event_monitor_wait_handler)
     }
 
-    pub fn set_monitor_waited_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_monitor_waited_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn monitor_waited_enabled(&mut self) {
+        self.settings.MonitorWaited = Some(jvmti_event_monitor_waited_handler)
     }
 
-    pub fn set_monitor_contended_enter_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_monitor_contended_enter_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn monitor_contended_enter_enabled(&mut self) {
+        self.settings.MonitorContendedEnter = Some(jvmti_event_monitor_contended_enter_handler)
     }
 
-    pub fn set_monitor_contended_entered_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_monitor_contended_entered_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn monitor_contended_entered_enabled(&mut self) {
+        self.settings.MonitorContendedEntered = Some(jvmti_event_monitor_contended_entered_handler)
     }
 
-    pub fn set_resource_exhausted_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_resource_exhausted_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn resource_exhausted_enabled(&mut self) {
+        self.settings.ResourceExhausted = Some(jvmti_event_resource_exhausted_handler)
     }
 
-    pub fn set_garbage_collection_start_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_garbage_collection_start_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn garbage_collection_start_enabled(&mut self) {
+        self.settings.GarbageCollectionStart = Some(jvmti_event_garbage_collection_start_handler)
     }
 
-    pub fn set_garbage_collection_finish_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_garbage_collection_finish_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn garbage_collection_finish_enabled(&mut self) {
+        self.settings.GarbageCollectionFinish = Some(jvmti_event_garbage_collection_finish_handler)
     }
 
-    pub fn set_object_free_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_object_free_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn object_free_enabled(&mut self) {
+        self.settings.ObjectFree = Some(jvmti_event_object_free_handler)
     }
 
-    pub fn set_vm_object_alloc_enabled(&mut self, value: bool) {
-        unsafe {
-            rvmti_sys::set_jvmti_event_status_vm_object_alloc_enabled(self.settings, if value { 1 } else { 0 });
-        }
+    pub fn vm_object_alloc_enabled(&mut self) {
+        self.settings.VMObjectAlloc = Some(jvmti_event_vm_object_alloc_handler)
     }
 
-    pub fn get_vm_init_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_vm_init_enabled(self.settings) != 0
-        }
+    pub fn sampled_object_alloc_enabled(&mut self) {
+        self.settings.SampledObjectAlloc = Some(jvmti_event_sampled_object_alloc_handler)
     }
-
-    pub fn get_vm_death_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_vm_death_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_thread_start_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_thread_start_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_thread_end_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_thread_end_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_class_file_load_hook_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_class_file_load_hook_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_class_load_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_class_load_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_class_prepare_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_class_prepare_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_vm_start_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_vm_start_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_exception_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_exception_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_exception_catch_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_exception_catch_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_single_step_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_single_step_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_frame_pop_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_frame_pop_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_breakpoint_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_breakpoint_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_field_access_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_field_access_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_field_modification_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_field_modification_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_method_entry_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_method_entry_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_method_exit_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_method_exit_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_native_method_bind_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_native_method_bind_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_compiled_method_load_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_compiled_method_load_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_compiled_method_unload_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_compiled_method_unload_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_dynamic_code_generated_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_dynamic_code_generated_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_data_dump_request_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_data_dump_request_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_monitor_wait_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_monitor_wait_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_monitor_waited_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_monitor_waited_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_monitor_contended_enter_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_monitor_contended_enter_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_monitor_contended_entered_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_monitor_contended_entered_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_resource_exhausted_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_resource_exhausted_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_garbage_collection_start_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_garbage_collection_start_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_garbage_collection_finish_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_garbage_collection_finish_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_object_free_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_object_free_enabled(self.settings) != 0
-        }
-    }
-
-    pub fn get_vm_object_alloc_enabled(&self) -> bool {
-        unsafe {
-            rvmti_sys::get_jvmti_event_status_vm_object_alloc_enabled(self.settings) != 0
-        }
-    }
-}
-
-impl Drop for JvmtiEventCallbacksSettings {
-
-    fn drop(&mut self) {
-        unsafe {
-            rvmti_sys::free_jvmti_event_callback_status(self.settings);
-            debug!("Event callback settings freed");
-        }
-    }
-
 }
 
 impl From<JvmtiVersion> for rvmti_sys::jint {
@@ -2073,7 +1497,7 @@ impl<'a> Drop for VmOwnedString<'a> {
     fn drop(&mut self) {
         unsafe {
             if !self.ptr.is_null() {
-                let result = rvmti_sys::jvmti_env_deallocate(self.env.env, self.ptr as *mut c_void);
+                let result = (*(*(self.env.env))).Deallocate.unwrap()(self.env.env, self.ptr as *mut c_uchar);
                 if result == rvmti_sys::jvmtiError_JVMTI_ERROR_NONE {
                     debug!("VM owned string is deallocated");
                 } else {
@@ -2090,7 +1514,7 @@ impl<'a> Drop for VmOwnedLineNumberTable<'a> {
     fn drop(&mut self) {
         unsafe {
             if !self.ptr.is_null() {
-                let result = rvmti_sys::jvmti_env_deallocate(self.env.env, self.ptr as *mut c_void);
+                let result = (*(*(self.env.env))).Deallocate.unwrap()(self.env.env, self.ptr as *mut c_uchar);
                 if result == rvmti_sys::jvmtiError_JVMTI_ERROR_NONE {
                     debug!("VM owned line number table is deallocated");
                 } else {
