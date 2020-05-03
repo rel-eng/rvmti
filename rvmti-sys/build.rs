@@ -9,7 +9,6 @@ use std::env;
 use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
-use std::error::Error;
 use std::io::Read;
 use std::path::Path;
 use bindgen::callbacks::ParseCallbacks;
@@ -40,17 +39,17 @@ fn main() {
         .stderr(Stdio::piped())
         .spawn()
         {
-            Err(why) => panic!("Couldn't spawn process: {}", why.description()),
+            Err(why) => panic!("Couldn't spawn process: {}", why),
             Ok(process) => process,
         };
     match java_process.wait()
         {
-            Err(why) => panic!("Couldn't wait until process is finished: {}", why.description()),
+            Err(why) => panic!("Couldn't wait until process is finished: {}", why),
             Ok(_) => (),
         }
     let mut java_out = String::new();
     match java_process.stderr.expect("Couldn't get process stderr").read_to_string(&mut java_out) {
-        Err(why) => panic!("Couldn't read process stderr: {}", why.description()),
+        Err(why) => panic!("Couldn't read process stderr: {}", why),
         Ok(_) => (),
     }
     let java_home = java_out.lines().find(|line| line.contains("java.home")).and_then(|line| line.split(" = ").nth(1))

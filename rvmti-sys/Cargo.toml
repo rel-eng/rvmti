@@ -10,10 +10,10 @@ version = "0.1.0"
 edition = "2018"
 
 [build-dependencies]
-bindgen = "0.46.0"
-cc = "1.0.28"
-log = "0.4.6"
-env_logger = "0.6.0"
+bindgen = "0.53.2"
+cc = "1.0.52"
+log = "0.4.8"
+env_logger = "0.7.1"
 
 [profile.dev]
 panic = 'unwind'
