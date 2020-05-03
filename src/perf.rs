@@ -14,7 +14,7 @@ use std::os::unix::io::AsRawFd;
 use std::ptr;
 
 use log::{debug, error};
-use failure_derive::Fail;
+use thiserror::Error;
 use byteorder::{ReadBytesExt, NativeEndian, ByteOrder};
 use rand::{thread_rng, Rng};
 use rand::distributions::Alphanumeric;
@@ -459,48 +459,48 @@ fn get_e_machine() -> Result<u16, GetEMachineError> {
     Ok(info[1])
 }
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 pub enum WriteHeaderError {
-    #[fail(display = "I/O error: {}", _0)]
-    IoError(#[cause] io::Error),
-    #[fail(display = "Failed to get e_machine value for the current process: {}", _0)]
-    FailedToGetEMachine(#[cause] GetEMachineError),
-    #[fail(display = "Failed to get current timestamp: {}", _0)]
-    FailedToGetTimestamp(#[cause] nix::errno::Errno),
+    #[error("I/O error: {0}")]
+    IoError(#[source] io::Error),
+    #[error("Failed to get e_machine value for the current process: {0}")]
+    FailedToGetEMachine(#[source] GetEMachineError),
+    #[error("Failed to get current timestamp: {0}")]
+    FailedToGetTimestamp(#[source] nix::errno::Errno),
 }
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 pub enum WriteRecordError {
-    #[fail(display = "I/O error: {}", _0)]
-    IoError(#[cause] io::Error),
-    #[fail(display = "Failed to get current timestamp: {}", _0)]
-    FailedToGetTimestamp(#[cause] nix::errno::Errno),
+    #[error("I/O error: {0}")]
+    IoError(#[source] io::Error),
+    #[error("Failed to get current timestamp: {0}")]
+    FailedToGetTimestamp(#[source] nix::errno::Errno),
 }
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 pub enum GetEMachineError {
-    #[fail(display = "I/O error: {}", _0)]
-    IoError(#[cause] io::Error),
-    #[fail(display = "Not an ELF file")]
+    #[error("I/O error: {0}")]
+    IoError(#[source] io::Error),
+    #[error("Not an ELF file")]
     NotAnElfFile,
 }
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 pub enum CreteDumpDirError {
-    #[fail(display = "I/O error: {}", _0)]
-    IoError(#[cause] io::Error),
-    #[fail(display = "Too many failed attempts to create random temp dir")]
+    #[error("I/O error: {0}")]
+    IoError(#[source] io::Error),
+    #[error("Too many failed attempts to create random temp dir")]
     DirNameConflict,
 }
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 pub enum NewDumpFileError {
-    #[fail(display = "I/O error: {}", _0)]
-    IoError(#[cause] io::Error),
-    #[fail(display = "MMap error: {}", _0)]
-    MmapError(#[cause] nix::Error),
-    #[fail(display = "SysConf error: {}", _0)]
-    SysconfError(#[cause] nix::Error),
-    #[fail(display = "Memory page size is unknown")]
+    #[error("I/O error: {0}")]
+    IoError(#[source] io::Error),
+    #[error("MMap error: {0}")]
+    MmapError(#[source] nix::Error),
+    #[error("SysConf error: {0}")]
+    SysconfError(#[source] nix::Error),
+    #[error("Memory page size is unknown")]
     UnknownPageSize,
 }

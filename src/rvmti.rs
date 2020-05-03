@@ -15,7 +15,7 @@ use std::slice;
 use std::mem::size_of;
 
 use log::{debug, warn, error};
-use failure_derive::Fail;
+use thiserror::Error;
 
 use crate::agent_on_load;
 use crate::agent_on_unload;
@@ -495,21 +495,21 @@ pub enum JvmtiEvent {
     SampledObjectAlloc,
 }
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 pub enum JniError {
-    #[fail(display = "Unknown JNI error")]
+    #[error("Unknown JNI error")]
     UnknownError,
-    #[fail(display = "A thread is detached from the VM")]
+    #[error("A thread is detached from the VM")]
     ThreadDetachedFromVm,
-    #[fail(display = "JNI version error")]
+    #[error("JNI version error")]
     JniVersionError,
-    #[fail(display = "Not enough memory")]
+    #[error("Not enough memory")]
     NotEnoughMemory,
-    #[fail(display = "VM is already created")]
+    #[error("VM is already created")]
     VmAlreadyCreated,
-    #[fail(display = "Invalid arguments")]
+    #[error("Invalid arguments")]
     InvalidArguments,
-    #[fail(display = "Unsupported JNI error code: {}", _0)]
+    #[error("Unsupported JNI error code: {0}")]
     UnsupportedError(i32),
 }
 
@@ -523,150 +523,150 @@ pub enum JvmtiVersion {
     CurrentVersion,
 }
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 pub enum JvmtiError {
-    #[fail(display = "Invalid thread")]
+    #[error("Invalid thread")]
     InvalidThread,
-    #[fail(display = "Invalid thread group")]
+    #[error("Invalid thread group")]
     InvalidThreadGroup,
-    #[fail(display = "Invalid priority")]
+    #[error("Invalid priority")]
     InvalidPriority,
-    #[fail(display = "Thread is not suspended")]
+    #[error("Thread is not suspended")]
     ThreadNotSuspended,
-    #[fail(display = "Thread is already suspended")]
+    #[error("Thread is already suspended")]
     ThreadSuspended,
-    #[fail(display = "Thread is not alive")]
+    #[error("Thread is not alive")]
     ThreadNotAlive,
-    #[fail(display = "Invalid object")]
+    #[error("Invalid object")]
     InvalidObject,
-    #[fail(display = "Invalid class")]
+    #[error("Invalid class")]
     InvalidClass,
-    #[fail(display = "The class is not prepared yet")]
+    #[error("The class is not prepared yet")]
     ClassNotPrepared,
-    #[fail(display = "Invalid method id")]
+    #[error("Invalid method id")]
     InvalidMethodId,
-    #[fail(display = "Invalid location")]
+    #[error("Invalid location")]
     InvalidLocation,
-    #[fail(display = "Invalid field id")]
+    #[error("Invalid field id")]
     InvalidFieldId,
-    #[fail(display = "Invalid module")]
+    #[error("Invalid module")]
     InvalidModule,
-    #[fail(display = "There are no more stack frames")]
+    #[error("There are no more stack frames")]
     NoMoreFrames,
-    #[fail(display = "No information is available about the stack frame")]
+    #[error("No information is available about the stack frame")]
     OpaqueFrame,
-    #[fail(display = "Variable type mismatch")]
+    #[error("Variable type mismatch")]
     TypeMismatch,
-    #[fail(display = "Invalid slot")]
+    #[error("Invalid slot")]
     InvalidSlot,
-    #[fail(display = "The item is already set")]
+    #[error("The item is already set")]
     Duplicate,
-    #[fail(display = "Element is not found")]
+    #[error("Element is not found")]
     NotFound,
-    #[fail(display = "Invalid raw monitor")]
+    #[error("Invalid raw monitor")]
     InvalidMonitor,
-    #[fail(display = "The raw monitor is not owned by this thread")]
+    #[error("The raw monitor is not owned by this thread")]
     NotMonitorOwner,
-    #[fail(display = "The call has been interrupted")]
+    #[error("The call has been interrupted")]
     Interrupt,
-    #[fail(display = "Malformed class file")]
+    #[error("Malformed class file")]
     InvalidClassFormat,
-    #[fail(display = "Circular class definition")]
+    #[error("Circular class definition")]
     CircularClassDefinition,
-    #[fail(display = "The class fails verification")]
+    #[error("The class fails verification")]
     FailsVerification,
-    #[fail(display = "Class redefinition not possible, method addition is unsupported")]
+    #[error("Class redefinition not possible, method addition is unsupported")]
     UnsupportedRedefinitionMethodAdded,
-    #[fail(display = "Class redefinition not possible, field change is unsupported")]
+    #[error("Class redefinition not possible, field change is unsupported")]
     UnsupportedRedefinitionSchemaChanged,
-    #[fail(display = "The thread state is inconsistent due to it having been modified")]
+    #[error("The thread state is inconsistent due to it having been modified")]
     InvalidTypeState,
-    #[fail(display = "Class redefinition not possible, class hierarchy change is unsupported")]
+    #[error("Class redefinition not possible, class hierarchy change is unsupported")]
     UnsupportedRedefinitionHierarchyChanged,
-    #[fail(display = "Class redefinition not possible, method deletion is unsupported")]
+    #[error("Class redefinition not possible, method deletion is unsupported")]
     UnsupportedRedefinitionMethodDeleted,
-    #[fail(display = "Class file version is unsupported")]
+    #[error("Class file version is unsupported")]
     UnsupportedVersion,
-    #[fail(display = "Class names do not match")]
+    #[error("Class names do not match")]
     NamesDontMatch,
-    #[fail(display = "Class redefinition not possible, class modifiers change is unsupported")]
+    #[error("Class redefinition not possible, class modifiers change is unsupported")]
     UnsupportedRedefinitionClassModifiersChanged,
-    #[fail(display = "Class redefinition not possible, method modifiers change is unsupported")]
+    #[error("Class redefinition not possible, method modifiers change is unsupported")]
     UnsupportedRedefinitionMethodModifiersChanged,
-    #[fail(display = "The class is unmodifiable")]
+    #[error("The class is unmodifiable")]
     UnmodifiableClass,
-    #[fail(display = "The module is unmodifiable")]
+    #[error("The module is unmodifiable")]
     UnmodifiableModule,
-    #[fail(display = "The functionality is not available")]
+    #[error("The functionality is not available")]
     NotAvaliable,
-    #[fail(display = "This environment does not possess the required capability")]
+    #[error("This environment does not possess the required capability")]
     MustPosessCapability,
-    #[fail(display = "Unexpected null pointer")]
+    #[error("Unexpected null pointer")]
     NullPointer,
-    #[fail(display = "Information is not available")]
+    #[error("Information is not available")]
     AbsentInformation,
-    #[fail(display = "Invalid event type")]
+    #[error("Invalid event type")]
     InvalidEventType,
-    #[fail(display = "Illegal argument")]
+    #[error("Illegal argument")]
     IllegalArgument,
-    #[fail(display = "Information is not available for native method")]
+    #[error("Information is not available for native method")]
     NativeMethod,
-    #[fail(display = "This class loader does not support the requested operation")]
+    #[error("This class loader does not support the requested operation")]
     ClassLoaderUnsupported,
-    #[fail(display = "Out of memory")]
+    #[error("Out of memory")]
     OutOfMemory,
-    #[fail(display = "Access denied")]
+    #[error("Access denied")]
     AccessDenied,
-    #[fail(display = "The functionality is not available in the current phase")]
+    #[error("The functionality is not available in the current phase")]
     WrongPhase,
-    #[fail(display = "Unexpected internal error")]
+    #[error("Unexpected internal error")]
     Internal,
-    #[fail(display = "The thread is not attached to the virtual machine")]
+    #[error("The thread is not attached to the virtual machine")]
     UnattachedThread,
-    #[fail(display = "Invalid environment")]
+    #[error("Invalid environment")]
     InvalidEnvironment,
-    #[fail(display = "Unsupported JVMTI error code: {}", _0)]
+    #[error("Unsupported JVMTI error code: {0}")]
     UnsupportedError(u32),
 }
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 pub enum GetMethodNameError {
-    #[fail(display = "JVMTI method call error: {}", _0)]
-    VmError(#[cause] JvmtiError),
-    #[fail(display = "Failed to decode method name: {}", _0)]
-    NameDecodeError(#[cause] StringDecodeError),
-    #[fail(display = "Failed to decode method signature: {}", _0)]
-    SignatureDecodeError(#[cause] StringDecodeError),
-    #[fail(display = "Failed to decode method generic signature: {}", _0)]
-    GenericSignatureDecodeError(#[cause] StringDecodeError),
+    #[error("JVMTI method call error: {0}")]
+    VmError(#[source] JvmtiError),
+    #[error("Failed to decode method name: {0}")]
+    NameDecodeError(#[source] StringDecodeError),
+    #[error("Failed to decode method signature: {0}")]
+    SignatureDecodeError(#[source] StringDecodeError),
+    #[error("Failed to decode method generic signature: {0}")]
+    GenericSignatureDecodeError(#[source] StringDecodeError),
 }
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 pub enum GetClassSignatureError {
-    #[fail(display = "JVMTI method call error: {}", _0)]
-    VmError(#[cause] JvmtiError),
-    #[fail(display = "Failed to decode class signature: {}", _0)]
-    SignatureDecodeError(#[cause] StringDecodeError),
-    #[fail(display = "Failed to decode class generic signature: {}", _0)]
-    GenericSignatureDecodeError(#[cause] StringDecodeError),
+    #[error("JVMTI method call error: {0}")]
+    VmError(#[source] JvmtiError),
+    #[error("Failed to decode class signature: {0}")]
+    SignatureDecodeError(#[source] StringDecodeError),
+    #[error("Failed to decode class generic signature: {0}")]
+    GenericSignatureDecodeError(#[source] StringDecodeError),
 }
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 pub enum GetSourceFileNameError {
-    #[fail(display = "JVMTI method call error: {}", _0)]
-    VmError(#[cause] JvmtiError),
-    #[fail(display = "Failed to decode source file name: {}", _0)]
-    SourceFileNameDecodeError(#[cause] StringDecodeError),
+    #[error("JVMTI method call error: {0}")]
+    VmError(#[source] JvmtiError),
+    #[error("Failed to decode source file name: {0}")]
+    SourceFileNameDecodeError(#[source] StringDecodeError),
 }
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 pub enum StringDecodeError {
-    #[fail(display = "Invalid modified UTF-8 encoding")]
+    #[error("Invalid modified UTF-8 encoding")]
     ModifiedUtf8Error,
-    #[fail(display = "Invalid UTF-8 byte string: {}", _0)]
-    FromUtf8Error(#[cause] FromUtf8Error),
-    #[fail(display = "Invalid UTF-8 byte string: {}", _0)]
-    Utf8Error(#[cause] str::Utf8Error),
+    #[error("Invalid UTF-8 byte string: {0}")]
+    FromUtf8Error(#[source] FromUtf8Error),
+    #[error("Invalid UTF-8 byte string: {0}")]
+    Utf8Error(#[source] str::Utf8Error),
 }
 
 impl Jvm {

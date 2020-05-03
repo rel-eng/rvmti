@@ -18,7 +18,7 @@ use std::slice;
 
 use log::{debug, warn, error, info};
 use lazy_static::lazy_static;
-use failure_derive::Fail;
+use thiserror::Error;
 
 pub use crate::rvmti::Agent_OnLoad;
 pub use crate::rvmti::Agent_OnUnload;
@@ -474,72 +474,72 @@ pub struct StackInfo {
     stack_frames: Vec<StackFrameInfo>,
 }
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 enum AgentInitError {
-    #[fail(display = "Failed to add capabilities: {}", _0)]
-    UnableToAddCapabilities(#[cause] rvmti::JvmtiError),
-    #[fail(display = "Failed to set event callbacks: {}", _0)]
-    UnableToSetEventCallbacks(#[cause] rvmti::JvmtiError),
-    #[fail(display = "Failed to enable events: {}", _0)]
-    UnableToEnableEvents(#[cause] rvmti::JvmtiError),
-    #[fail(display = "Failed to obtain jvmti environment: {}", _0)]
-    UnableToObtainJvmtiEnvironment(#[cause] rvmti::JniError),
-    #[fail(display = "The mutex was poisoned")]
+    #[error("Failed to add capabilities: {0}")]
+    UnableToAddCapabilities(#[source] rvmti::JvmtiError),
+    #[error("Failed to set event callbacks: {0}")]
+    UnableToSetEventCallbacks(#[source] rvmti::JvmtiError),
+    #[error("Failed to enable events: {0}")]
+    UnableToEnableEvents(#[source] rvmti::JvmtiError),
+    #[error("Failed to obtain jvmti environment: {0}")]
+    UnableToObtainJvmtiEnvironment(#[source] rvmti::JniError),
+    #[error("The mutex was poisoned")]
     PoisonedMutexError,
-    #[fail(display = "Failed to create jit dump directory: {}", _0)]
-    UnableToCreateDumpDir(#[cause] perf::CreteDumpDirError),
-    #[fail(display = "Failed to create jit dump file: {}", _0)]
-    UnableToCreateDumpFile(#[cause] perf::NewDumpFileError),
+    #[error("Failed to create jit dump directory: {0}")]
+    UnableToCreateDumpDir(#[source] perf::CreteDumpDirError),
+    #[error("Failed to create jit dump file: {0}")]
+    UnableToCreateDumpFile(#[source] perf::NewDumpFileError),
 }
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 enum MethodInfoError {
-    #[fail(display = "Failed to obtain method name: {}", _0)]
-    UnableToGetMethodName(#[cause] rvmti::GetMethodNameError),
-    #[fail(display = "Failed to obtain method declaring class id: {}", _0)]
-    UnableToGetMethodDeclaringClass(#[cause] rvmti::JvmtiError),
-    #[fail(display = "Failed to obtain method declaring class info: {}", _0)]
-    UnableToGetDeclaringClassInfo(#[cause] ClassInfoError),
-    #[fail(display = "Failed to check if method is native: {}", _0)]
-    UnableToCheckIfMethodIsNative(#[cause] rvmti::JvmtiError),
-    #[fail(display = "Failed to obtain method line numbers: {}", _0)]
-    UnableToGetMethodLineNumbers(#[cause] rvmti::JvmtiError),
+    #[error("Failed to obtain method name: {0}")]
+    UnableToGetMethodName(#[source] rvmti::GetMethodNameError),
+    #[error("Failed to obtain method declaring class id: {0}")]
+    UnableToGetMethodDeclaringClass(#[source] rvmti::JvmtiError),
+    #[error("Failed to obtain method declaring class info: {0}")]
+    UnableToGetDeclaringClassInfo(#[source] ClassInfoError),
+    #[error("Failed to check if method is native: {0}")]
+    UnableToCheckIfMethodIsNative(#[source] rvmti::JvmtiError),
+    #[error("Failed to obtain method line numbers: {0}")]
+    UnableToGetMethodLineNumbers(#[source] rvmti::JvmtiError),
 }
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 enum ClassInfoError {
-    #[fail(display = "Failed to obtain class signature: {}", _0)]
-    UnableToGetClassSignature(#[cause] rvmti::GetClassSignatureError),
-    #[fail(display = "Failed to obtain class source file name: {}", _0)]
-    UnableToGetClassSourceFileName(#[cause] rvmti::GetSourceFileNameError),
+    #[error("Failed to obtain class signature: {0}")]
+    UnableToGetClassSignature(#[source] rvmti::GetClassSignatureError),
+    #[error("Failed to obtain class source file name: {0}")]
+    UnableToGetClassSourceFileName(#[source] rvmti::GetSourceFileNameError),
 }
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 enum StackInfoError {
-    #[fail(display = "Failed to obtain method metadata: {}", _0)]
-    UnableToGetMethodInfo(#[cause] MethodInfoError),
+    #[error("Failed to obtain method metadata: {0}")]
+    UnableToGetMethodInfo(#[source] MethodInfoError),
 }
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 enum DynamicCodeGeneratedHandlerError {
-    #[fail(display = "Unable to get timestamp: {}", _0)]
-    UnableToGetTimestamp(#[cause] nix::errno::Errno),
-    #[fail(display = "Agent is not initialized")]
+    #[error("Unable to get timestamp: {0}")]
+    UnableToGetTimestamp(#[source] nix::errno::Errno),
+    #[error("Agent is not initialized")]
     AgentNotInitialized,
-    #[fail(display = "Failed to lock agent environment")]
+    #[error("Failed to lock agent environment")]
     FailedToLockAgentEnvironment,
 }
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 enum CompiledMethodLoadHandlerError {
-    #[fail(display = "Unable to get timestamp: {}", _0)]
-    UnableToGetTimestamp(#[cause] nix::errno::Errno),
-    #[fail(display = "Agent is not initialized")]
+    #[error("Unable to get timestamp: {0}")]
+    UnableToGetTimestamp(#[source] nix::errno::Errno),
+    #[error("Agent is not initialized")]
     AgentNotInitialized,
-    #[fail(display = "Failed to lock agent environment")]
+    #[error("Failed to lock agent environment")]
     FailedToLockAgentEnvironment,
-    #[fail(display = "Unable to get method info: {}", _0)]
-    UnableToGetMethodInfo(#[cause] MethodInfoError),
-    #[fail(display = "Unable to get stack info: {}", _0)]
-    UnableToGetStackInfo(#[cause] StackInfoError),
+    #[error("Unable to get method info: {0}")]
+    UnableToGetMethodInfo(#[source] MethodInfoError),
+    #[error("Unable to get stack info: {0}")]
+    UnableToGetStackInfo(#[source] StackInfoError),
 }

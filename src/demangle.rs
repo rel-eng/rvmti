@@ -7,7 +7,7 @@
 
 use std::fmt;
 
-use failure_derive::Fail;
+use thiserror::Error;
 
 #[derive(Debug, PartialEq)]
 pub struct BinaryName {
@@ -405,9 +405,9 @@ impl fmt::Display for MethodType {
 
 }
 
-#[derive(Fail, Debug)]
+#[derive(Error, Debug)]
 pub enum DemangleError {
-    #[fail(display = "Failed to demangle")]
+    #[error("Failed to demangle")]
     DemangleFailed,
 }
 
